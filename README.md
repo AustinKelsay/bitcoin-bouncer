@@ -419,6 +419,8 @@ npm run smoke:polar
 
 The smoke runner uses port `3130` by default because local Polar stacks may
 already use `3000` for Grafana. It verifies the model endpoint, Gate Node,
-Propagation Witnesses, Bouncer health, state reset, Fuzz Candidate submission,
-audit lookup, and propagation expectations. The command prints a JSON step
-report that can be attached to the tracking issue for the smoke run.
+Propagation Witnesses, Bouncer health without secret leakage, state reset,
+malformed candidate rejection, Fuzz Candidate submission, duplicate idempotency,
+audit lookup, action-specific follow-up checks, and propagation expectations.
+The command prints a JSON step report that can be attached to the tracking issue
+for the smoke run.

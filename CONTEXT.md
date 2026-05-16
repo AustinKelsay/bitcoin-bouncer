@@ -157,6 +157,7 @@ _Avoid_: passed transaction, Bouncer relay, release
 - **Propagation Witnesses** verify peer propagation in tests and status checks; **Shadow Escape** is recorded only from blocks.
 - A **Gate Submission Failure** returns the Gate Node's submission error and does not rewrite the agent decision.
 - A **Bouncer Test Sender** creates v1 candidate transactions, but does not broadcast them directly.
+- A read-only smoke-test demo should present the **Bouncer Test Sender**, **Bouncer Runtime**, and **Propagation Witness** as the three primary actors.
 - The first **Fuzz Candidates** are valid wallet-funded transactions created from Gate Node funds and submitted through Bouncer.
 - Invalid **Fuzz Candidates** exercise parse failures and **Preflight Rejects**, not normal Live Agent judgment.
 - Fuzz generation starts as a script outside the **Bouncer API**, not as a runtime endpoint.
@@ -339,3 +340,4 @@ _Avoid_: passed transaction, Bouncer relay, release
 - The first **Relay Gate** boundary is a **Submission Gate**, not p2p interception or Bitcoin Core mempool policy integration.
 - A local Polar network with three Bitcoin Core nodes can verify **Submission Gate** behavior by checking whether passed transactions propagate and held or dropped transactions do not appear in peer mempools.
 - "accepted" and "relayed" must not be used internally for **Shadow Drop** transactions, because Bouncer withheld them from the Gate Node even if the submitter-facing response is success-shaped.
+- "random peer" is imprecise for the smoke-test demo; use **Propagation Witness** for the non-Gate Polar Core node that checks visibility.

@@ -14,6 +14,11 @@ type SubmitResponse =
   | { txid: string; status?: string; action?: string }
   | Record<string, unknown>;
 
+type FuzzSubmitResult = {
+  rawTx: string;
+  response: SubmitResponse;
+};
+
 const config = {
   bouncerUrl: process.env.BOUNCER_URL ?? "http://127.0.0.1:3130",
   port: process.env.PORT ?? "3130",
@@ -48,17 +53,23 @@ try {
   await mkdir("state", { recursive: true });
   bouncer = await startBouncerRuntime();
   await resetState();
-  const submitResponse = await submitFuzzCandidate();
+  await submitMalformedCandidate();
+  const submitResult = await submitFuzzCandidate();
+  const submitResponse = submitResult.response;
   const txid = extractTxid(submitResponse);
-  pass(
-    "Audit event recorded",
-    await fetchJson(`${config.bouncerUrl}/v1/audit?txid=${txid}`),
-  );
+  const duplicateResponse = await submitRawTransaction(submitResult.rawTx);
+  assertJsonEqual(duplicateResponse, submitResponse, "duplicate submit outcome");
+  pass("Duplicate submit returned Idempotency Record", duplicateResponse);
+  const audit = await fetchJson(`${config.bouncerUrl}/v1/audit?txid=${txid}`);
+  assertAuditMatches({ audit, txid, response: submitResponse });
+  pass("Audit event recorded", audit);
 
   if (isSubmitted(submitResponse)) {
     await verifyPropagation(txid, "present");
+    assertNoLiveAgentFallback(audit);
   } else {
     await verifyPropagation(txid, "absent");
+    await inspectWithheldOutcome(txid, submitResponse);
   }
 
   await resetState();
@@ -120,7 +131,9 @@ async function startBouncerRuntime() {
   child.stderr.on("data", (chunk) => process.stderr.write(chunk));
 
   await waitForHealth();
-  pass("Bouncer Runtime ready", await fetchJson(`${config.bouncerUrl}/v1/health`));
+  const health = await fetchText(`${config.bouncerUrl}/v1/health`);
+  assertDoesNotContainSecrets(health);
+  pass("Bouncer Runtime ready", JSON.parse(health));
 
   return child;
 }
@@ -149,7 +162,26 @@ async function resetState() {
   pass("Bouncer state reset", response);
 }
 
-async function submitFuzzCandidate(): Promise<SubmitResponse> {
+async function submitMalformedCandidate() {
+  const response = await fetchJson(`${config.bouncerUrl}/submit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ rawTx: "not-a-raw-transaction" }),
+    expectedStatuses: [400],
+  });
+
+  assertJsonEqual(
+    response,
+    {
+      status: "parse_failure",
+      reason: "TX decode failed",
+    },
+    "malformed candidate response",
+  );
+  pass("Malformed candidate rejected before Live Agent", response);
+}
+
+async function submitFuzzCandidate(): Promise<FuzzSubmitResult> {
   const walletRpc = createBitcoinCoreRpc({
     url: config.gateNodeUrl,
     username: config.rpcUser,
@@ -193,7 +225,18 @@ async function submitFuzzCandidate(): Promise<SubmitResponse> {
   });
 
   pass("Fuzz Candidate submitted through Bouncer", result.response);
-  return result.response as SubmitResponse;
+  return {
+    rawTx: result.rawTx,
+    response: result.response as SubmitResponse,
+  };
+}
+
+async function submitRawTransaction(rawTx: string) {
+  return fetchJson(`${config.bouncerUrl}/submit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ rawTx }),
+  }) as Promise<SubmitResponse>;
 }
 
 async function verifyPropagation(txid: string, expected: "present" | "absent") {
@@ -243,13 +286,26 @@ async function fetchJson(
     method?: string;
     headers?: Record<string, string>;
     body?: string;
+    expectedStatuses?: number[];
   },
 ): Promise<unknown> {
   const response = await fetch(url, init);
   const body = await response.json().catch(() => undefined);
+  const expectedStatuses = init?.expectedStatuses ?? [];
+
+  if (!response.ok && !expectedStatuses.includes(response.status)) {
+    throw new Error(`HTTP ${response.status} from ${url}: ${JSON.stringify(body)}`);
+  }
+
+  return body;
+}
+
+async function fetchText(url: string): Promise<string> {
+  const response = await fetch(url);
+  const body = await response.text();
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status} from ${url}: ${JSON.stringify(body)}`);
+    throw new Error(`HTTP ${response.status} from ${url}: ${body}`);
   }
 
   return body;
@@ -265,6 +321,80 @@ function extractTxid(response: SubmitResponse): string {
 
 function isSubmitted(response: SubmitResponse): boolean {
   return response.status === "submitted";
+}
+
+async function inspectWithheldOutcome(txid: string, response: SubmitResponse) {
+  if (
+    response.status === "held" &&
+    "holdId" in response &&
+    typeof response.holdId === "string"
+  ) {
+    pass(
+      "Hold Queue record inspectable",
+      await fetchJson(`${config.bouncerUrl}/v1/holds/${response.holdId}`),
+    );
+    return;
+  }
+
+  if (response.status === "dropped") {
+    pass("Honest drop withheld from Gate Node", response);
+    return;
+  }
+
+  if (!response.status) {
+    pass(
+      "Shadow Realm record inspectable",
+      await fetchJson(`${config.bouncerUrl}/v1/shadow-realm/${txid}`),
+    );
+  }
+}
+
+function assertAuditMatches(input: {
+  audit: unknown;
+  txid: string;
+  response: SubmitResponse;
+}) {
+  if (!isRecord(input.audit) || !Array.isArray(input.audit.events)) {
+    throw new Error(`Audit response malformed: ${JSON.stringify(input.audit)}`);
+  }
+
+  const [event] = input.audit.events;
+
+  if (!isRecord(event) || event.txid !== input.txid) {
+    throw new Error(`Audit response missing txid ${input.txid}`);
+  }
+
+  if (event.promptHash !== undefined && typeof event.promptHash !== "string") {
+    throw new Error(`Audit prompt hash malformed: ${JSON.stringify(event)}`);
+  }
+}
+
+function assertNoLiveAgentFallback(audit: unknown) {
+  const serialized = JSON.stringify(audit);
+
+  if (serialized.includes("live_agent_fallback")) {
+    throw new Error(`Expected real model action, got fallback audit: ${serialized}`);
+  }
+}
+
+function assertDoesNotContainSecrets(body: string) {
+  for (const secret of [config.rpcUser, config.rpcPassword, config.gateNodeUrl]) {
+    if (secret && body.includes(secret)) {
+      throw new Error(`Health response leaked secret/config value: ${secret}`);
+    }
+  }
+}
+
+function assertJsonEqual(actual: unknown, expected: unknown, label: string) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(
+      `Unexpected ${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+    );
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function parseWitnesses(value: string) {
