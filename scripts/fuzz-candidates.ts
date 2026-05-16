@@ -1,10 +1,16 @@
 #!/usr/bin/env tsx
 import { createBitcoinCoreRpc } from "../src/bitcoin-core-rpc.js";
-import { runFuzzCandidates } from "../src/fuzz-candidate-runner.js";
+import {
+  parseFuzzCandidateShapes,
+  runFuzzCandidates,
+} from "../src/fuzz-candidate-runner.js";
 
 const bouncerUrl = process.env.BOUNCER_URL ?? "http://127.0.0.1:3000";
 const count = parsePositiveInteger(process.env.FUZZ_COUNT, 1);
 const amountBtc = parsePositiveNumber(process.env.FUZZ_AMOUNT_BTC, 0.00001);
+const candidateShapes = parseFuzzCandidateShapes(
+  process.env.FUZZ_CANDIDATE_SHAPES,
+);
 
 const walletRpc = createBitcoinCoreRpc({
   url: process.env.BITCOIN_RPC_URL ?? "http://127.0.0.1:18443",
@@ -67,10 +73,11 @@ const results = await runFuzzCandidates({
   bouncer,
   count,
   amountBtc,
+  candidateShapes,
 });
 
 for (const result of results) {
-  console.log(JSON.stringify(result.response));
+  console.log(JSON.stringify(result));
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number) {

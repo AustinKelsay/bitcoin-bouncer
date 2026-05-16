@@ -395,12 +395,19 @@ BITCOIN_RPC_URL=http://127.0.0.1:18443 \
 BITCOIN_RPC_USER=polaruser \
 BITCOIN_RPC_PASSWORD=polarpass \
 FUZZ_COUNT=3 \
+FUZZ_CANDIDATE_SHAPES=standard-single-output,standard-multi-output,tiny-output,rbf-enabled,rbf-disabled,sub-1-sat-vb-fee \
 npm run fuzz:candidates
 ```
 
 The script uses Gate Node wallet RPC to create, fund, sign, and finalize raw
 transactions, then submits each raw transaction through `/submit`. It does not
 call `sendrawtransaction`; Bouncer remains the Submission Gate.
+
+Available wallet-funded candidate shapes are `standard-single-output`,
+`standard-multi-output`, `tiny-output`, `rbf-enabled`, `rbf-disabled`, and
+`sub-1-sat-vb-fee`. Shapes cycle when `FUZZ_COUNT` is larger than the list. Each
+printed result includes the candidate shape, raw transaction, and Bouncer
+response so smoke evidence can be replayed or reduced later.
 
 Invalid candidate coverage is separate: submit malformed `rawTx` values through
 `/submit` to exercise parse failures, or valid-but-rejected transactions to

@@ -88,6 +88,14 @@ _Avoid_: external wallet, direct broadcaster
 A generated raw transaction submitted through Bouncer to exercise gate behavior.
 _Avoid_: direct broadcast, production transaction
 
+**Candidate Diversity**:
+Variation in valid or near-valid Fuzz Candidate shapes used to expose the Submission Gate and Live Agent to different transaction summaries and preflight facts.
+_Avoid_: full-node protocol fuzzing, consensus fuzzing
+
+**Sub-1-Sat/VB Candidate**:
+A Fuzz Candidate intentionally funded near or below one satoshi per virtual byte to exercise low-fee preflight facts and Live Agent judgment.
+_Avoid_: sub-satoshi fee, impossible fractional total fee
+
 **Preflight Check**:
 A node-local acceptance check performed before the Live Agent decides and before the transaction is submitted.
 _Avoid_: broadcast attempt, dry-run relay
@@ -159,6 +167,9 @@ _Avoid_: passed transaction, Bouncer relay, release
 - A **Bouncer Test Sender** creates v1 candidate transactions, but does not broadcast them directly.
 - A read-only smoke-test demo should present the **Bouncer Test Sender**, **Bouncer Runtime**, and **Propagation Witness** as the three primary actors.
 - The first **Fuzz Candidates** are valid wallet-funded transactions created from Gate Node funds and submitted through Bouncer.
+- **Candidate Diversity** is the next fuzzing priority for Bouncer; invalid/adversarial harness pressure remains useful but is secondary to expanding valid candidate shapes for now.
+- Fuzzamoto-style scenario work can inspire **Candidate Diversity**, but Bouncer does not aim to become a full-node coverage-guided fuzzer.
+- Candidate diversity should start with wallet-funded standard transactions: single-output, multi-output, tiny-output, RBF-enabled, RBF-disabled, and **Sub-1-Sat/VB Candidate** shapes.
 - Invalid **Fuzz Candidates** exercise parse failures and **Preflight Rejects**, not normal Live Agent judgment.
 - Fuzz generation starts as a script outside the **Bouncer API**, not as a runtime endpoint.
 - A **Preflight Check** gives the **Live Agent** node-policy facts without placing the transaction in the mempool.

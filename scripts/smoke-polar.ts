@@ -2,7 +2,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { createBitcoinCoreRpc } from "../src/bitcoin-core-rpc.js";
-import { runFuzzCandidates } from "../src/fuzz-candidate-runner.js";
+import {
+  parseFuzzCandidateShapes,
+  runFuzzCandidates,
+} from "../src/fuzz-candidate-runner.js";
 
 type SmokeStep = {
   name: string;
@@ -15,6 +18,7 @@ type SubmitResponse =
   | Record<string, unknown>;
 
 type FuzzSubmitResult = {
+  shape: string;
   rawTx: string;
   response: SubmitResponse;
 };
@@ -37,6 +41,10 @@ const config = {
   modelTimeoutMs: process.env.BOUNCER_MODEL_TIMEOUT_MS ?? "30000",
   fuzzCount: parsePositiveInteger(process.env.FUZZ_COUNT, 1),
   fuzzAmountBtc: parsePositiveNumber(process.env.FUZZ_AMOUNT_BTC, 0.00001),
+  candidateShapes:
+    parseFuzzCandidateShapes(process.env.FUZZ_CANDIDATE_SHAPES) ?? [
+      "standard-single-output",
+    ],
 };
 
 const steps: SmokeStep[] = [];
@@ -187,7 +195,7 @@ async function submitFuzzCandidate(): Promise<FuzzSubmitResult> {
     username: config.rpcUser,
     password: config.rpcPassword,
   });
-  const [result] = await runFuzzCandidates({
+  const results = await runFuzzCandidates({
     wallet: {
       getNewAddress() {
         return walletRpc("getnewaddress", []) as Promise<string>;
@@ -222,10 +230,19 @@ async function submitFuzzCandidate(): Promise<FuzzSubmitResult> {
     },
     count: config.fuzzCount,
     amountBtc: config.fuzzAmountBtc,
+    candidateShapes: config.candidateShapes,
   });
+  const [result] = results;
 
-  pass("Fuzz Candidate submitted through Bouncer", result.response);
+  pass(
+    "Fuzz Candidate batch submitted through Bouncer",
+    results.map((entry) => ({
+      shape: entry.shape,
+      response: entry.response,
+    })),
+  );
   return {
+    shape: result.shape,
     rawTx: result.rawTx,
     response: result.response as SubmitResponse,
   };
