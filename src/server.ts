@@ -2,27 +2,74 @@ import { buildBouncerApi } from "./app.js";
 import { BitcoinCoreGateNode } from "./bitcoin-core-gate-node.js";
 import { createBitcoinCoreRpc } from "./bitcoin-core-rpc.js";
 import type { LiveAgent } from "./domain.js";
+import { createPiHttpAgentClient } from "./pi-http-agent-client.js";
+import { createPiLiveAgentAdapter } from "./pi-live-agent-adapter.js";
+import { loadBouncerRuntimeConfig } from "./runtime-config.js";
+import { createSqliteBouncerStateStore } from "./sqlite-state-store.js";
 
 const port = Number(process.env.PORT ?? 3000);
+let runtimeConfig;
+
+try {
+  runtimeConfig = await loadBouncerRuntimeConfig(process.env);
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Failed to load Bouncer runtime config: ${message}`);
+  process.exit(1);
+}
 
 const gateNode = new BitcoinCoreGateNode({
   rpc: createBitcoinCoreRpc({
-    url: process.env.BITCOIN_RPC_URL ?? "http://127.0.0.1:18443",
-    username: process.env.BITCOIN_RPC_USER ?? "polaruser",
-    password: process.env.BITCOIN_RPC_PASSWORD ?? "polarpass",
+    url: runtimeConfig.gateNode.rpc.url,
+    username: runtimeConfig.gateNode.rpc.username,
+    password: runtimeConfig.gateNode.rpc.password,
   }),
 });
 
-const failOpenAgent: LiveAgent = {
-  async decide() {
-    return { action: "pass", reason: "live agent adapter not configured" };
-  },
-};
+const failOpenAgent: LiveAgent = runtimeConfig.piAgent
+  ? createPiLiveAgentAdapter({
+      client: createPiHttpAgentClient({ url: runtimeConfig.piAgent.url }),
+      prompt: runtimeConfig.prompt.content,
+      promptHash: runtimeConfig.prompt.hash,
+      timeoutMs: runtimeConfig.piAgent.timeoutMs,
+      async peek(transaction) {
+        return {
+          txid: transaction.summary.txid,
+          rawTx: transaction.rawTx,
+          summary: transaction.summary,
+          preflight: transaction.preflight,
+        };
+      },
+    })
+  : {
+      async decide() {
+        return { action: "pass", reason: "live agent adapter not configured" };
+      },
+    };
 
 const app = buildBouncerApi({
   gateNode,
   liveAgent: failOpenAgent,
+  stateStore: createSqliteBouncerStateStore({
+    databasePath: runtimeConfig.state.databasePath,
+  }),
+  runtime: {
+    promptHash: runtimeConfig.prompt.hash,
+    gateNodeName: runtimeConfig.gateNode.name,
+    propagationWitnessNames: runtimeConfig.propagationWitnesses.map(
+      (witness) => witness.name,
+    ),
+  },
 });
 
 await app.listen({ port, host: "0.0.0.0" });
-app.log.info(`bitcoin-bouncer listening on ${port}`);
+app.log.info(
+  {
+    promptHash: runtimeConfig.prompt.hash,
+    gateNode: runtimeConfig.gateNode.name,
+    propagationWitnesses: runtimeConfig.propagationWitnesses.map(
+      (witness) => witness.name,
+    ),
+  },
+  `bitcoin-bouncer listening on ${port}`,
+);

@@ -184,3 +184,245 @@ The harness decides only:
 - what gets logged
 
 The user prompt decides what kinds of transaction shapes feel unwanted.
+
+## Polar Demo
+
+The MVP demo assumes a local Polar network with one **Gate Node** and optional
+**Propagation Witnesses**. The first Gate Node is usually `backend1`.
+
+```sh
+export BOUNCER_PROMPT_PATH=bouncer.prompt.md
+export BOUNCER_STATE_DB_PATH=state/bouncer.sqlite
+export BITCOIN_GATE_NODE_NAME=backend1
+export BITCOIN_RPC_URL=http://127.0.0.1:18443
+export BITCOIN_RPC_USER=polaruser
+export BITCOIN_RPC_PASSWORD=polarpass
+export BITCOIN_PROPAGATION_WITNESSES=backend2=http://127.0.0.1:18444,backend3=http://127.0.0.1:18445
+```
+
+Start the **Bouncer Runtime**:
+
+```sh
+npm install
+npm run build
+npm start
+```
+
+During local development, use:
+
+```sh
+npm run dev
+```
+
+Check runtime status and prompt hash:
+
+```sh
+curl http://127.0.0.1:3000/v1/health
+```
+
+### Pi Live Agent
+
+Set `PI_AGENT_URL` to enable the Pi-backed **Live Agent** path:
+
+```sh
+export PI_AGENT_URL=http://127.0.0.1:8787/decide
+export PI_AGENT_TIMEOUT_MS=1000
+```
+
+Probe the endpoint contract before starting a full Bouncer run:
+
+```sh
+PI_AGENT_URL=http://127.0.0.1:8787/decide npm run probe:pi-agent
+```
+
+The probe sends a representative Bouncer decision request and prints the
+normalized Agent Action. It exits non-zero if the endpoint returns prose,
+unsupported JSON, or a non-2xx HTTP response.
+
+Bouncer sends Pi the startup-loaded **Bouncer Prompt**, active prompt hash,
+compact transaction summary, preflight facts, and optional bounded
+**Deep Transaction View** after one `peek`.
+
+The request body sent to `PI_AGENT_URL` is:
+
+```json
+{
+  "prompt": "...",
+  "promptHash": "sha256:...",
+  "transaction": {
+    "rawTx": "020000000001...",
+    "summary": {
+      "txid": "...",
+      "vsize": 188,
+      "weight": 749,
+      "inputs": 1,
+      "outputs": 2,
+      "outputScripts": ["p2tr"],
+      "outputValuesSats": [546]
+    },
+    "preflight": {
+      "allowed": true,
+      "feeRateSatVb": 0.4
+    }
+  }
+}
+```
+
+Pi must return structured JSON, not prose:
+
+```json
+{"action":"pass"}
+{"action":"tag","label":"low-fee-normal"}
+{"action":"hold","reason":"operator review"}
+{"action":"drop","reason":"data-like transaction shape"}
+{"action":"shadow_drop","reason":"withhold but return txid"}
+{"action":"peek"}
+```
+
+The HTTP client also accepts common envelopes around that same action:
+
+```json
+{"decision":{"action":"pass"}}
+{"agentAction":{"action":"drop","reason":"data-like"}}
+{"result":{"action":"tag","label":"normal"}}
+```
+
+For OpenAI-style `output_json` responses, Bouncer extracts the first content
+item shaped like:
+
+```json
+{"type":"output_json","json":{"action":"pass"}}
+```
+
+`hold`, `drop`, and `shadow_drop` require `reason`. `tag` requires `label`.
+Pi may call `peek` at most once, then it must return a final non-`peek` action.
+Timeouts, malformed actions, repeated `peek`, or no final action fail open to
+`pass` and are recorded internally as Live Agent fallback audit metadata.
+
+Reset the current Polar run state:
+
+```sh
+curl -X POST http://127.0.0.1:3000/v1/state/reset
+```
+
+### Submit Path
+
+Submit a candidate raw transaction through the **Bouncer Submit Path**:
+
+```sh
+curl -sS -X POST http://127.0.0.1:3000/submit \
+  -H 'content-type: application/json' \
+  -d '{"rawTx":"020000000001..."}'
+```
+
+`/v1/transactions` is the versioned alias for the same path.
+
+Expected submitter-facing responses:
+
+```json
+{"status":"submitted","txid":"...","action":"pass"}
+{"status":"submitted","txid":"...","action":"tag","label":"low-fee-normal"}
+{"status":"held","txid":"...","holdId":"...","reason":"operator review"}
+{"status":"dropped","txid":"...","reason":"data-like transaction shape"}
+{"txid":"..."}
+```
+
+The last response is **Shadow Drop**. It is intentionally success-shaped for
+the submitter and does not include fake peer counts or fake mempool metadata.
+
+### Hold Queue
+
+List and inspect held transactions:
+
+```sh
+curl http://127.0.0.1:3000/v1/holds
+curl http://127.0.0.1:3000/v1/holds/HOLD_ID
+```
+
+Release a held transaction to the **Gate Node**:
+
+```sh
+curl -X POST http://127.0.0.1:3000/v1/holds/HOLD_ID/release
+```
+
+Discard a held transaction without submission:
+
+```sh
+curl -X POST http://127.0.0.1:3000/v1/holds/HOLD_ID/discard
+```
+
+Held transactions do not retry or submit automatically.
+
+### Shadow Realm And Audit
+
+Inspect a **Shadow Realm** record:
+
+```sh
+curl http://127.0.0.1:3000/v1/shadow-realm/TXID
+```
+
+Query truthful audit events:
+
+```sh
+curl 'http://127.0.0.1:3000/v1/audit?txid=TXID'
+curl 'http://127.0.0.1:3000/v1/audit?outcome=shadow_drop'
+```
+
+Audit outcomes include `pass`, `tag`, `drop`, `hold`, `shadow_drop`,
+`preflight_reject`, `queue_full_pass`, `hold_queue_full_pass`, and
+`gate_submission_failure`. If Shadow Realm payload storage degrades,
+`shadow_drop` still withholds the transaction and the audit event records the
+degraded storage state.
+
+### Propagation Verification
+
+For `pass` and `tag`, verify the txid appears on the **Gate Node** and
+configured **Propagation Witnesses**:
+
+```sh
+TXID=... EXPECTED=present npm run verify:propagation
+```
+
+For `hold`, `drop`, and `shadow_drop`, verify the txid is absent from the Gate
+Node and witness mempools:
+
+```sh
+TXID=... EXPECTED=absent npm run verify:propagation
+```
+
+Witness mempool visibility is only a demo/status check. It is not recorded as
+**Shadow Escape**.
+
+### Shadow Escape
+
+Shadow Escape detection is block-based. After mining a block in Polar, scan the
+Gate Node block range:
+
+```sh
+FROM_HEIGHT=101 TO_HEIGHT=101 npm run scan:shadow-escapes
+```
+
+If a shadow-dropped txid appears in a mined block through an external route, the
+scan records a **Shadow Escape** observation in SQLite without rewriting the
+original Shadow Drop decision.
+
+### Fuzz Candidates
+
+Generate valid wallet-funded **Fuzz Candidates** without direct broadcast:
+
+```sh
+BOUNCER_URL=http://127.0.0.1:3000 \
+BITCOIN_RPC_URL=http://127.0.0.1:18443 \
+BITCOIN_RPC_USER=polaruser \
+BITCOIN_RPC_PASSWORD=polarpass \
+FUZZ_COUNT=3 \
+npm run fuzz:candidates
+```
+
+The script uses Gate Node wallet RPC to create, fund, sign, and finalize raw
+transactions, then submits each raw transaction through `/submit`. It does not
+call `sendrawtransaction`; Bouncer remains the Submission Gate.
+
+Invalid candidate coverage is separate: submit malformed `rawTx` values through
+`/submit` to exercise parse failures, or valid-but-rejected transactions to
+exercise **Preflight Reject**.
