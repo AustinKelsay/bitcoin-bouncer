@@ -25,6 +25,13 @@ export type AgentAction =
   | { action: "shadow_drop"; reason: string }
   | { action: "tag"; label: string };
 
+export type DeepTransactionView = {
+  txid: string;
+  rawTx: string;
+  summary: TxSummary;
+  preflight: PreflightCheck & { allowed: true };
+};
+
 export type GateNode = {
   summarize(rawTx: string): Promise<TxSummary>;
   preflight(rawTx: string): Promise<PreflightCheck>;
@@ -55,7 +62,19 @@ export type BouncerStateStore = {
     txid: string;
     outcome: string;
     responseBody: unknown;
+    promptHash?: string;
   }): Promise<void> | void;
+  findAuditEvents?(query: {
+    txid?: string;
+    outcome?: string;
+  }): Promise<
+    Array<{
+      txid: string;
+      outcome: string;
+      responseBody: unknown;
+      promptHash?: string;
+    }>
+  >;
   recordTag(input: {
     txid: string;
     label: string;
@@ -67,11 +86,44 @@ export type BouncerStateStore = {
     reason: string;
     summary: TxSummary;
   }): Promise<{ holdId: string }> | { holdId: string };
+  listHolds?(query?: { status?: "held" | "released" | "discarded" }): Promise<
+    Array<{
+      holdId: string;
+      txid: string;
+      status: "held" | "released" | "discarded";
+      reason: string;
+      rawTx: string;
+      summary: TxSummary;
+    }>
+  >;
+  releaseHold?(holdId: string): Promise<void>;
+  discardHold?(holdId: string): Promise<void>;
   shadowDrop(input: {
     rawTx: string;
     txid: string;
     reason: string;
     summary: TxSummary;
   }): Promise<void> | void;
+  findShadowDrop?(txid: string): Promise<
+    | {
+        txid: string;
+        reason: string;
+        rawTx: string;
+        summary: TxSummary;
+      }
+    | undefined
+  >;
+  recordShadowEscape?(input: {
+    txid: string;
+    blockHash: string;
+    blockHeight: number;
+  }): Promise<void>;
+  findShadowEscapes?(txid: string): Promise<
+    Array<{
+      txid: string;
+      blockHash: string;
+      blockHeight: number;
+    }>
+  >;
   reset(): Promise<void> | void;
 };

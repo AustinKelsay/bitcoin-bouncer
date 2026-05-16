@@ -9,7 +9,10 @@
   "scripts": {
     "test": "vitest run",
     "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js",
+    "fuzz:candidates": "tsx scripts/fuzz-candidates.ts",
+    "verify:propagation": "tsx scripts/verify-propagation.ts",
+    "scan:shadow-escapes": "tsx scripts/scan-shadow-escapes.ts",
+    "start": "node dist/src/server.js",
     "build": "tsc"
   },
   "repository": {
@@ -24,6 +27,9 @@
     "url": "https://github.com/AustinKelsay/bitcoin-bouncer/issues"
   },
   "homepage": "https://github.com/AustinKelsay/bitcoin-bouncer#readme",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "dependencies": {
     "fastify": "^5.8.5",
     "zod": "^4.4.3"

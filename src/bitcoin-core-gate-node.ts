@@ -1,4 +1,6 @@
 import type { GateNode, PreflightCheck, TxSummary } from "./domain.js";
+import type { GateNodeBlockSource } from "./shadow-escape-monitor.js";
+import type { MempoolVisibilityNode } from "./propagation-verifier.js";
 
 type RpcCall = (method: string, params: unknown[]) => Promise<unknown>;
 
@@ -23,6 +25,12 @@ type TestMempoolAcceptResult = {
     base?: number;
   };
   vsize?: number;
+};
+
+type VerboseBlock = {
+  hash: string;
+  height: number;
+  tx: string[];
 };
 
 const scriptTypeLabels: Record<string, string> = {
@@ -86,6 +94,45 @@ export class BitcoinCoreGateNode implements GateNode {
   }
 }
 
+export class BitcoinCoreObservationNode
+  implements GateNodeBlockSource, MempoolVisibilityNode
+{
+  readonly name: string;
+  readonly #rpc: RpcCall;
+
+  constructor(dependencies: { name: string; rpc: RpcCall }) {
+    this.name = dependencies.name;
+    this.#rpc = dependencies.rpc;
+  }
+
+  async getBlockByHeight(height: number) {
+    const blockHash = (await this.#rpc("getblockhash", [height])) as string;
+    const block = (await this.#rpc("getblock", [
+      blockHash,
+      1,
+    ])) as VerboseBlock;
+
+    return {
+      hash: block.hash,
+      height: block.height,
+      txids: block.tx,
+    };
+  }
+
+  async hasTransactionInMempool(txid: string): Promise<boolean> {
+    try {
+      await this.#rpc("getmempoolentry", [txid]);
+      return true;
+    } catch (error) {
+      if (isMempoolMiss(error)) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+}
+
 function normalizeScriptType(type: string | undefined): string {
   if (!type) {
     return "unknown";
@@ -100,4 +147,15 @@ function feeRateSatVb(result: TestMempoolAcceptResult): number | undefined {
   }
 
   return (result.fees.base * 100_000_000) / result.vsize;
+}
+
+function isMempoolMiss(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.message.includes("Transaction not in mempool") ||
+    error.message.includes("not in mempool")
+  );
 }
