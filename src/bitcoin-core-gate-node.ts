@@ -156,7 +156,6 @@ function isMempoolMiss(error: unknown): boolean {
 
   return (
     error.message.includes("Transaction not in mempool") ||
-    error.message.includes("not in mempool") ||
-    error.message.includes("No such mempool")
+    error.message.includes("not in mempool")
   );
 }

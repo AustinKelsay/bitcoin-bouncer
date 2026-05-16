@@ -1,5 +1,10 @@
 import type { BouncerStateStore } from "./domain.js";
 
+type ShadowEscapeStateStore = {
+  findShadowDrop: NonNullable<BouncerStateStore["findShadowDrop"]>;
+  recordShadowEscape: NonNullable<BouncerStateStore["recordShadowEscape"]>;
+};
+
 export type GateNodeBlock = {
   hash: string;
   height: number;
@@ -18,7 +23,7 @@ export type ShadowEscapeObservation = {
 
 export async function scanGateNodeBlocksForShadowEscapes(input: {
   blockSource: GateNodeBlockSource;
-  stateStore: Pick<BouncerStateStore, "findShadowDrop" | "recordShadowEscape">;
+  stateStore: ShadowEscapeStateStore;
   fromHeight: number;
   toHeight: number;
 }): Promise<{
@@ -31,7 +36,7 @@ export async function scanGateNodeBlocksForShadowEscapes(input: {
     const block = await input.blockSource.getBlockByHeight(height);
 
     for (const txid of block.txids) {
-      const shadowDrop = await input.stateStore.findShadowDrop?.(txid);
+      const shadowDrop = await input.stateStore.findShadowDrop(txid);
 
       if (!shadowDrop) {
         continue;
@@ -43,7 +48,7 @@ export async function scanGateNodeBlocksForShadowEscapes(input: {
         blockHeight: block.height,
       };
 
-      await input.stateStore.recordShadowEscape?.(observation);
+      await input.stateStore.recordShadowEscape(observation);
       shadowEscapes.push(observation);
     }
   }

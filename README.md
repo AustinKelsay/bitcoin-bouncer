@@ -257,8 +257,8 @@ The request body sent to `PI_AGENT_URL` is:
       "weight": 749,
       "inputs": 1,
       "outputs": 2,
-      "outputScripts": ["p2tr"],
-      "outputValuesSats": [546]
+      "outputScripts": ["p2tr", "op_return"],
+      "outputValuesSats": [546, 0]
     },
     "preflight": {
       "allowed": true,

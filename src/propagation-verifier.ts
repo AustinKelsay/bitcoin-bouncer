@@ -21,7 +21,6 @@ export async function verifyPropagation(input: {
   expected: PropagationExpectation;
   gateNode: MempoolVisibilityNode;
   propagationWitnesses: MempoolVisibilityNode[];
-  onShadowEscape?: () => void;
 }): Promise<PropagationVerificationResult> {
   const nodes = [input.gateNode, ...input.propagationWitnesses];
   const results = await Promise.all(

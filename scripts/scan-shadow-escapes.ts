@@ -4,8 +4,15 @@ import { createBitcoinCoreRpc } from "../src/bitcoin-core-rpc.js";
 import { scanGateNodeBlocksForShadowEscapes } from "../src/shadow-escape-monitor.js";
 import { createSqliteBouncerStateStore } from "../src/sqlite-state-store.js";
 
-const fromHeight = Number(requireEnv("FROM_HEIGHT"));
-const toHeight = Number(process.env.TO_HEIGHT ?? fromHeight);
+const fromHeight = parseBlockHeight(requireEnv("FROM_HEIGHT"), "FROM_HEIGHT");
+const toHeight = parseBlockHeight(
+  process.env.TO_HEIGHT ?? String(fromHeight),
+  "TO_HEIGHT",
+);
+
+if (toHeight < fromHeight) {
+  throw new Error("TO_HEIGHT must be greater than or equal to FROM_HEIGHT");
+}
 
 const gateNode = new BitcoinCoreObservationNode({
   name: process.env.BITCOIN_GATE_NODE_NAME ?? "backend1",
@@ -40,4 +47,14 @@ function requireEnv(name: string): string {
   }
 
   return value;
+}
+
+function parseBlockHeight(value: string, name: string): number {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer`);
+  }
+
+  return parsed;
 }

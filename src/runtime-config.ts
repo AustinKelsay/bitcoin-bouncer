@@ -142,6 +142,19 @@ function parsePiAgentConfig(
 
   return {
     url,
-    timeoutMs: Number(environment.PI_AGENT_TIMEOUT_MS ?? 1000),
+    timeoutMs: parsePositiveNumber(environment.PI_AGENT_TIMEOUT_MS, 1000),
   };
+}
+
+function parsePositiveNumber(
+  value: string | undefined,
+  fallback: number,
+): number {
+  const parsed = Number(value ?? fallback);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
 }

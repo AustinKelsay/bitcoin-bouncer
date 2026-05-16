@@ -35,8 +35,6 @@ describe("Propagation verifier", () => {
   });
 
   it("confirms a withheld transaction is absent without recording Shadow Escape", async () => {
-    const shadowEscapeRecorder = vi.fn();
-
     const result = await verifyPropagation({
       txid: "abc123",
       expected: "absent",
@@ -50,10 +48,8 @@ describe("Propagation verifier", () => {
           hasTransactionInMempool: vi.fn().mockResolvedValue(false),
         },
       ],
-      onShadowEscape: shadowEscapeRecorder,
     });
 
     expect(result.passed).toBe(true);
-    expect(shadowEscapeRecorder).not.toHaveBeenCalled();
   });
 });

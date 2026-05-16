@@ -3,8 +3,8 @@ import { createBitcoinCoreRpc } from "../src/bitcoin-core-rpc.js";
 import { runFuzzCandidates } from "../src/fuzz-candidate-runner.js";
 
 const bouncerUrl = process.env.BOUNCER_URL ?? "http://127.0.0.1:3000";
-const count = Number(process.env.FUZZ_COUNT ?? 1);
-const amountBtc = Number(process.env.FUZZ_AMOUNT_BTC ?? 0.00001);
+const count = parsePositiveInteger(process.env.FUZZ_COUNT, 1);
+const amountBtc = parsePositiveNumber(process.env.FUZZ_AMOUNT_BTC, 0.00001);
 
 const walletRpc = createBitcoinCoreRpc({
   url: process.env.BITCOIN_RPC_URL ?? "http://127.0.0.1:18443",
@@ -53,7 +53,9 @@ const bouncer = {
     const body = (await response.json()) as unknown;
 
     if (!response.ok) {
-      throw new Error(`Bouncer submit failed with HTTP ${response.status}`);
+      throw new Error(
+        `Bouncer submit failed with HTTP ${response.status}: ${JSON.stringify(body)}`,
+      );
     }
 
     return body;
@@ -69,4 +71,24 @@ const results = await runFuzzCandidates({
 
 for (const result of results) {
   console.log(JSON.stringify(result.response));
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(value ?? String(fallback), 10);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function parsePositiveNumber(value: string | undefined, fallback: number) {
+  const parsed = Number.parseFloat(value ?? String(fallback));
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
 }
