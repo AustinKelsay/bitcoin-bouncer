@@ -9,6 +9,11 @@ import {
 const txid = requireEnv("TXID");
 const expected = parseExpectation(process.env.EXPECTED ?? "present");
 const gateNodeName = process.env.BITCOIN_GATE_NODE_NAME ?? "backend1";
+const timeoutMs = parsePositiveNumber(process.env.PROPAGATION_TIMEOUT_MS, 5_000);
+const pollIntervalMs = parsePositiveNumber(
+  process.env.PROPAGATION_POLL_INTERVAL_MS,
+  250,
+);
 
 const gateNode = new BitcoinCoreObservationNode({
   name: gateNodeName,
@@ -38,6 +43,8 @@ const result = await verifyPropagation({
   expected,
   gateNode,
   propagationWitnesses,
+  timeoutMs,
+  pollIntervalMs,
 });
 
 console.log(JSON.stringify(result, null, 2));
@@ -59,6 +66,16 @@ function parseExpectation(value: string): PropagationExpectation {
   }
 
   throw new Error("EXPECTED must be present or absent");
+}
+
+function parsePositiveNumber(value: string | undefined, fallback: number) {
+  const parsed = Number(value ?? fallback);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return parsed;
 }
 
 function parseWitnesses(value: string | undefined) {

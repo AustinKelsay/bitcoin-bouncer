@@ -21,10 +21,47 @@ export async function verifyPropagation(input: {
   expected: PropagationExpectation;
   gateNode: MempoolVisibilityNode;
   propagationWitnesses: MempoolVisibilityNode[];
+  timeoutMs?: number;
+  pollIntervalMs?: number;
 }): Promise<PropagationVerificationResult> {
   const nodes = [input.gateNode, ...input.propagationWitnesses];
-  const results = await Promise.all(
-    nodes.map(async (node) => {
+  const timeoutMs = input.timeoutMs ?? 5_000;
+  const pollIntervalMs = input.pollIntervalMs ?? 250;
+  const deadline = Date.now() + timeoutMs;
+  let results = await observeNodes({
+    nodes,
+    txid: input.txid,
+    expected: input.expected,
+  });
+
+  while (
+    input.expected === "present" &&
+    !results.every((result) => result.passed) &&
+    Date.now() < deadline
+  ) {
+    await delay(pollIntervalMs);
+    results = await observeNodes({
+      nodes,
+      txid: input.txid,
+      expected: input.expected,
+    });
+  }
+
+  return {
+    txid: input.txid,
+    expected: input.expected,
+    passed: results.every((result) => result.passed),
+    nodes: results,
+  };
+}
+
+async function observeNodes(input: {
+  nodes: MempoolVisibilityNode[];
+  txid: string;
+  expected: PropagationExpectation;
+}) {
+  return Promise.all(
+    input.nodes.map(async (node) => {
       const visible = await node.hasTransactionInMempool(input.txid);
 
       return {
@@ -34,11 +71,8 @@ export async function verifyPropagation(input: {
       };
     }),
   );
+}
 
-  return {
-    txid: input.txid,
-    expected: input.expected,
-    passed: results.every((result) => result.passed),
-    nodes: results,
-  };
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

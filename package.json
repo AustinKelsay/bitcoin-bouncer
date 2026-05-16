@@ -10,6 +10,7 @@
     "test": "vitest run",
     "dev": "tsx watch src/server.ts",
     "fuzz:candidates": "tsx scripts/fuzz-candidates.ts",
+    "smoke:polar": "tsx scripts/smoke-polar.ts",
     "verify:propagation": "tsx scripts/verify-propagation.ts",
     "scan:shadow-escapes": "tsx scripts/scan-shadow-escapes.ts",
     "start": "node dist/src/server.js",

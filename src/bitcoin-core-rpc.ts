@@ -22,10 +22,6 @@ export function createBitcoinCoreRpc(options: BitcoinCoreRpcOptions) {
       }),
     });
 
-    if (!response.ok) {
-      throw new Error(`Bitcoin Core RPC HTTP ${response.status}`);
-    }
-
     const payload = (await response.json()) as {
       result?: unknown;
       error?: { message?: string } | null;
@@ -33,6 +29,10 @@ export function createBitcoinCoreRpc(options: BitcoinCoreRpcOptions) {
 
     if (payload.error) {
       throw new Error(payload.error.message ?? "Bitcoin Core RPC error");
+    }
+
+    if (!response.ok) {
+      throw new Error(`Bitcoin Core RPC HTTP ${response.status}`);
     }
 
     return payload.result;

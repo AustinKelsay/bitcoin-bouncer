@@ -52,4 +52,29 @@ describe("Propagation verifier", () => {
 
     expect(result.passed).toBe(true);
   });
+
+  it("polls briefly for witness propagation before failing a present expectation", async () => {
+    const witness = {
+      name: "backend2",
+      hasTransactionInMempool: vi
+        .fn()
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true),
+    };
+
+    const result = await verifyPropagation({
+      txid: "abc123",
+      expected: "present",
+      gateNode: {
+        name: "backend1",
+        hasTransactionInMempool: vi.fn().mockResolvedValue(true),
+      },
+      propagationWitnesses: [witness],
+      timeoutMs: 50,
+      pollIntervalMs: 0,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(witness.hasTransactionInMempool).toHaveBeenCalledTimes(2);
+  });
 });

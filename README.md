@@ -405,3 +405,20 @@ call `sendrawtransaction`; Bouncer remains the Submission Gate.
 Invalid candidate coverage is separate: submit malformed `rawTx` values through
 `/submit` to exercise parse failures, or valid-but-rejected transactions to
 exercise **Preflight Reject**.
+
+### Real Pi-Backed Smoke
+
+Run the full local smoke path on a non-`3000` Bouncer port:
+
+```sh
+BOUNCER_MODEL_BASE_URL=http://127.0.0.1:11434 \
+BOUNCER_MODEL_API_KEY=ollama \
+BOUNCER_MODEL_NAME=gemma4:e4b \
+npm run smoke:polar
+```
+
+The smoke runner uses port `3130` by default because local Polar stacks may
+already use `3000` for Grafana. It verifies the model endpoint, Gate Node,
+Propagation Witnesses, Bouncer health, state reset, Fuzz Candidate submission,
+audit lookup, and propagation expectations. The command prints a JSON step
+report that can be attached to the tracking issue for the smoke run.
