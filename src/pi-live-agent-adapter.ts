@@ -35,10 +35,13 @@ type PiTransactionContext = {
   preflight: PreflightCheck & { allowed: true };
 };
 
+const MODEL_RAW_TX_PREVIEW_CHARS = 512;
+
 export function createPiLiveAgentAdapter(input: {
   model: PiModelClient;
-  prompt: string;
-  promptHash: string;
+  prompt?: string;
+  promptHash?: string;
+  getPrompt?: () => { content: string; hash: string };
   peek: (input: {
     rawTx: string;
     summary: TxSummary;
@@ -48,9 +51,16 @@ export function createPiLiveAgentAdapter(input: {
 }): LiveAgent {
   return {
     async decide(transaction) {
+      const prompt = input.getPrompt?.() ?? {
+        content: input.prompt ?? "",
+        hash: input.promptHash ?? "",
+      };
+
       return withTimeout(
         decideWithPi({
           ...input,
+          prompt: prompt.content,
+          promptHash: prompt.hash,
           transaction,
         }),
         input.timeoutMs,
@@ -76,10 +86,11 @@ async function decideWithPi(input: {
     preflight: PreflightCheck & { allowed: true };
   };
 }): Promise<AgentAction> {
+  const modelTransaction = modelTransactionContext(input.transaction);
   const firstAction = await input.model.complete({
     prompt: input.prompt,
     promptHash: input.promptHash,
-    transaction: input.transaction,
+    transaction: modelTransaction,
     deepTransactionView: undefined,
     tools: firstTurnTools(),
   });
@@ -90,11 +101,13 @@ async function decideWithPi(input: {
   }
 
   if (firstToolCall.name === "peek") {
-    const deepTransactionView = await input.peek(input.transaction);
+    const deepTransactionView = modelDeepTransactionView(
+      await input.peek(input.transaction),
+    );
     const finalAction = await input.model.complete({
       prompt: input.prompt,
       promptHash: input.promptHash,
-      transaction: input.transaction,
+      transaction: modelTransaction,
       deepTransactionView,
       tools: terminalTools(),
     });
@@ -112,6 +125,34 @@ async function decideWithPi(input: {
   }
 
   return validateFinalToolCall(firstToolCall);
+}
+
+function modelTransactionContext(
+  transaction: PiTransactionContext,
+): PiTransactionContext {
+  return {
+    ...transaction,
+    rawTx: rawTxPreview(transaction.rawTx),
+  };
+}
+
+function modelDeepTransactionView(
+  deepTransactionView: DeepTransactionView,
+): DeepTransactionView {
+  return {
+    ...deepTransactionView,
+    rawTx: rawTxPreview(deepTransactionView.rawTx),
+  };
+}
+
+function rawTxPreview(rawTx: string): string {
+  if (rawTx.length <= MODEL_RAW_TX_PREVIEW_CHARS) {
+    return rawTx;
+  }
+
+  return `${rawTx.slice(0, MODEL_RAW_TX_PREVIEW_CHARS)}...<truncated ${
+    rawTx.length - MODEL_RAW_TX_PREVIEW_CHARS
+  } chars>`;
 }
 
 function validateFinalToolCall(toolCall: PiToolCall): AgentAction {

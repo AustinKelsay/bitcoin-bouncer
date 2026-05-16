@@ -47,10 +47,7 @@ describe("SQLite Bouncer State Store", () => {
   });
 
   it("appends audit events and queries them by txid and outcome", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bitcoin-bouncer-state-"));
-    const store = createSqliteBouncerStateStore({
-      databasePath: join(directory, "bouncer.sqlite"),
-    });
+    const store = createMemoryStore();
 
     await store.recordAuditEvent({
       txid: "abc123",
@@ -80,11 +77,65 @@ describe("SQLite Bouncer State Store", () => {
     store.close();
   });
 
-  it("creates, lists, releases, and discards Hold Queue entries", async () => {
+  it("persists ordered Bouncer Run Events for live smoke and fuzz observability", async () => {
     const directory = await mkdtemp(join(tmpdir(), "bitcoin-bouncer-state-"));
-    const store = createSqliteBouncerStateStore({
-      databasePath: join(directory, "bouncer.sqlite"),
+    const databasePath = join(directory, "bouncer.sqlite");
+    const firstStore = createSqliteBouncerStateStore({ databasePath });
+
+    const firstEvent = await firstStore.recordRunEvent({
+      runId: "smoke-123",
+      source: "smoke",
+      name: "Bouncer Runtime ready",
+      status: "passed",
+      detail: { gateNode: "backend1" },
     });
+    const secondEvent = await firstStore.recordRunEvent({
+      runId: "smoke-123",
+      source: "propagation",
+      name: "Propagation present",
+      status: "passed",
+      detail: {
+        txid: "abc123",
+        nodes: [{ name: "backend2", visible: true }],
+      },
+    });
+    firstStore.close();
+
+    const secondStore = createSqliteBouncerStateStore({ databasePath });
+
+    await expect(secondStore.listRunEvents()).resolves.toEqual([
+      firstEvent,
+      secondEvent,
+    ]);
+    secondStore.close();
+  });
+
+  it("clears Bouncer Run Events without clearing transaction state", async () => {
+    const store = createMemoryStore();
+
+    await store.recordRunEvent({
+      runId: "smoke-123",
+      source: "smoke",
+      name: "Smoke run started",
+      status: "running",
+    });
+    await store.recordAuditEvent({
+      txid: "abc123",
+      outcome: "drop",
+      responseBody: { status: "dropped", txid: "abc123" },
+    });
+
+    await store.clearRunEvents();
+
+    await expect(store.listRunEvents()).resolves.toEqual([]);
+    await expect(store.findAuditEvents({ txid: "abc123" })).resolves.toHaveLength(
+      1,
+    );
+    store.close();
+  });
+
+  it("creates, lists, releases, and discards Hold Queue entries", async () => {
+    const store = createMemoryStore();
 
     const firstHold = await store.hold({
       rawTx: "020000000001...",
@@ -125,10 +176,7 @@ describe("SQLite Bouncer State Store", () => {
   });
 
   it("creates distinct Hold Queue entries for repeated holds of the same txid", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bitcoin-bouncer-state-"));
-    const store = createSqliteBouncerStateStore({
-      databasePath: join(directory, "bouncer.sqlite"),
-    });
+    const store = createMemoryStore();
 
     const firstHold = await store.hold({
       rawTx: "020000000001...",
@@ -184,10 +232,7 @@ describe("SQLite Bouncer State Store", () => {
   });
 
   it("stores Shadow Realm records and appends Shadow Escape observations", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bitcoin-bouncer-state-"));
-    const store = createSqliteBouncerStateStore({
-      databasePath: join(directory, "bouncer.sqlite"),
-    });
+    const store = createMemoryStore();
 
     await store.shadowDrop({
       rawTx: "020000000001...",
@@ -217,11 +262,8 @@ describe("SQLite Bouncer State Store", () => {
     store.close();
   });
 
-  it("resets runtime state for a new Polar network run", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bitcoin-bouncer-state-"));
-    const store = createSqliteBouncerStateStore({
-      databasePath: join(directory, "bouncer.sqlite"),
-    });
+  it("resets transaction state for a new Polar network run while preserving demo run events", async () => {
+    const store = createMemoryStore();
 
     await store.rememberIdempotencyRecord({
       txid: "abc123",
@@ -250,6 +292,12 @@ describe("SQLite Bouncer State Store", () => {
       blockHash: "000000000000000000abc",
       blockHeight: 101,
     });
+    await store.recordRunEvent({
+      runId: "smoke-123",
+      source: "smoke",
+      name: "Bouncer Runtime ready",
+      status: "passed",
+    });
 
     await store.reset();
 
@@ -260,6 +308,18 @@ describe("SQLite Bouncer State Store", () => {
     await expect(store.listHolds()).resolves.toEqual([]);
     await expect(store.findShadowDrop("abc123")).resolves.toBeUndefined();
     await expect(store.findShadowEscapes("abc123")).resolves.toEqual([]);
+    await expect(store.listRunEvents()).resolves.toMatchObject([
+      {
+        runId: "smoke-123",
+        source: "smoke",
+        name: "Bouncer Runtime ready",
+        status: "passed",
+      },
+    ]);
     store.close();
   });
 });
+
+function createMemoryStore() {
+  return createSqliteBouncerStateStore({ databasePath: ":memory:" });
+}

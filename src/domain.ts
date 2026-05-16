@@ -6,6 +6,7 @@ export type TxSummary = {
   outputs: number;
   outputScripts: string[];
   outputValuesSats: number[];
+  opReturnUtf8?: string[];
 };
 
 export type PreflightCheck =
@@ -125,5 +126,32 @@ export type BouncerStateStore = {
       blockHeight: number;
     }>
   >;
+  listRunEvents?(): Promise<
+    Array<{
+      id: number;
+      runId: string;
+      source: "smoke" | "fuzz" | "propagation";
+      name: string;
+      status: "running" | "passed" | "failed" | "skipped";
+      detail?: unknown;
+      createdAt: string;
+    }>
+  >;
+  recordRunEvent?(input: {
+    runId: string;
+    source: "smoke" | "fuzz" | "propagation";
+    name: string;
+    status: "running" | "passed" | "failed" | "skipped";
+    detail?: unknown;
+  }): Promise<{
+    id: number;
+    runId: string;
+    source: "smoke" | "fuzz" | "propagation";
+    name: string;
+    status: "running" | "passed" | "failed" | "skipped";
+    detail?: unknown;
+    createdAt: string;
+  }>;
+  clearRunEvents?(): Promise<void>;
   reset(): Promise<void> | void;
 };

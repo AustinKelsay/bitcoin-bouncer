@@ -6,6 +6,10 @@ import {
   parseFuzzCandidateShapes,
   runFuzzCandidates,
 } from "../src/fuzz-candidate-runner.js";
+import {
+  createDemoRunEventPublisher,
+  createRunId,
+} from "../src/demo-run-events.js";
 
 type SmokeStep = {
   name: string;
@@ -48,6 +52,11 @@ const config = {
 };
 
 const steps: SmokeStep[] = [];
+const runId = process.env.BOUNCER_DEMO_RUN_ID ?? createRunId("smoke");
+const runEventPublisher = createDemoRunEventPublisher({
+  bouncerUrl: config.bouncerUrl,
+  eventUrl: process.env.BOUNCER_DEMO_EVENTS_URL,
+});
 let bouncer: ChildProcessWithoutNullStreams | undefined;
 
 try {
@@ -86,6 +95,7 @@ try {
   fail("smoke failed", errorMessage(error));
   process.exitCode = 1;
 } finally {
+  await runEventPublisher.flush();
   bouncer?.kill("SIGTERM");
   console.log(JSON.stringify({ steps }, null, 2));
 }
@@ -457,10 +467,43 @@ function trimTrailingSlash(value: string): string {
 
 function pass(name: string, detail?: unknown) {
   steps.push({ name, status: "passed", detail });
+  void runEventPublisher.publish({
+    runId,
+    source: name.startsWith("Propagation ") ? "propagation" : "smoke",
+    name,
+    status: "passed",
+    detail: sanitizeRunEventDetail(detail),
+  });
 }
 
 function fail(name: string, detail?: unknown) {
   steps.push({ name, status: "failed", detail });
+  void runEventPublisher.publish({
+    runId,
+    source: "smoke",
+    name,
+    status: "failed",
+    detail: sanitizeRunEventDetail(detail),
+  });
+}
+
+function sanitizeRunEventDetail(detail: unknown) {
+  if (!isRecord(detail)) {
+    return detail;
+  }
+
+  const redactedKeys = new Set([
+    "url",
+    "baseUrl",
+    "rpcUrl",
+    "rpcPassword",
+    "rpcUser",
+    "apiKey",
+  ]);
+
+  return Object.fromEntries(
+    Object.entries(detail).filter(([key]) => !redactedKeys.has(key)),
+  );
 }
 
 function errorMessage(error: unknown): string {

@@ -17,7 +17,7 @@ const summary: TxSummary = {
   outputValuesSats: [546, 0],
 };
 
-describe("Bouncer Submit Path", () => {
+describe.concurrent("Bouncer Submit Path", () => {
   it("accepts candidate raw transactions through /submit", async () => {
     const gateNode: GateNode = {
       summarize: vi.fn().mockResolvedValue(summary),
@@ -888,6 +888,350 @@ describe("Bouncer Audit Status", () => {
   });
 });
 
+describe("Bouncer Run Events", () => {
+  it("returns an empty run event list before smoke or fuzz scripts publish progress", async () => {
+    const gateNode: GateNode = {
+      summarize: vi.fn(),
+      preflight: vi.fn(),
+      submit: vi.fn(),
+    };
+    const liveAgent: LiveAgent = {
+      decide: vi.fn(),
+    };
+
+    const app = buildBouncerApi({ gateNode, liveAgent });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/demo/events",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ events: [] });
+  });
+
+  it("records smoke and fuzz run progress for the read-only demo dashboard", async () => {
+    const gateNode: GateNode = {
+      summarize: vi.fn(),
+      preflight: vi.fn(),
+      submit: vi.fn(),
+    };
+    const liveAgent: LiveAgent = {
+      decide: vi.fn(),
+    };
+
+    const app = buildBouncerApi({ gateNode, liveAgent });
+
+    const publishResponse = await app.inject({
+      method: "POST",
+      url: "/v1/demo/events",
+      payload: {
+        runId: "smoke-123",
+        source: "smoke",
+        name: "Bouncer Runtime ready",
+        status: "passed",
+        detail: {
+          gateNode: "backend1",
+          propagationWitnesses: ["backend2", "backend3"],
+        },
+      },
+    });
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/v1/demo/events",
+    });
+
+    expect(publishResponse.statusCode).toBe(200);
+    expect(publishResponse.json()).toMatchObject({
+      event: {
+        id: 1,
+        runId: "smoke-123",
+        source: "smoke",
+        name: "Bouncer Runtime ready",
+        status: "passed",
+        detail: {
+          gateNode: "backend1",
+          propagationWitnesses: ["backend2", "backend3"],
+        },
+      },
+    });
+    expect(publishResponse.json().event.createdAt).toEqual(expect.any(String));
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toEqual({
+      events: [publishResponse.json().event],
+    });
+  });
+
+  it("streams newly recorded run events for real-time dashboard logs", async () => {
+    const gateNode: GateNode = {
+      summarize: vi.fn(),
+      preflight: vi.fn(),
+      submit: vi.fn(),
+    };
+    const liveAgent: LiveAgent = {
+      decide: vi.fn(),
+    };
+
+    const app = buildBouncerApi({ gateNode, liveAgent });
+    const streamResponse = app.inject({
+      method: "GET",
+      url: "/v1/demo/events/stream?once=1",
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/v1/demo/events",
+      payload: {
+        runId: "forced_actions-123",
+        source: "smoke",
+        name: "Forced shadow_drop observed",
+        status: "passed",
+        detail: {
+          action: "shadow_drop",
+          txid: "abc123",
+          handling: "shadow-realm",
+        },
+      },
+    });
+
+    const response = await streamResponse;
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/event-stream");
+    expect(response.body).toContain("event: run-event");
+    expect(response.body).toContain("Forced shadow_drop observed");
+    expect(response.body).toContain("shadow-realm");
+  });
+
+  it("clears demo run events without clearing audit state", async () => {
+    const gateNode: GateNode = {
+      summarize: vi.fn(),
+      preflight: vi.fn(),
+      submit: vi.fn(),
+    };
+    const liveAgent: LiveAgent = {
+      decide: vi.fn(),
+    };
+
+    const app = buildBouncerApi({ gateNode, liveAgent });
+
+    await app.inject({
+      method: "POST",
+      url: "/v1/demo/events",
+      payload: {
+        runId: "smoke-123",
+        source: "smoke",
+        name: "Smoke run started",
+        status: "running",
+      },
+    });
+    const clearResponse = await app.inject({
+      method: "DELETE",
+      url: "/v1/demo/events",
+    });
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/v1/demo/events",
+    });
+
+    expect(clearResponse.statusCode).toBe(200);
+    expect(clearResponse.json()).toEqual({ status: "cleared" });
+    expect(listResponse.json()).toEqual({ events: [] });
+  });
+
+  it("starts a demo run and records it for the dashboard", async () => {
+    const gateNode: GateNode = {
+      summarize: vi.fn(),
+      preflight: vi.fn(),
+      submit: vi.fn(),
+    };
+    const liveAgent: LiveAgent = {
+      decide: vi.fn(),
+    };
+    const demoRunTrigger = vi.fn(async ({ recordEvent, runId }) => {
+      await recordEvent({
+        runId,
+        source: "smoke",
+        name: "Forced action observed",
+        status: "passed",
+        detail: { action: "hold" },
+      });
+    });
+
+    const app = buildBouncerApi({ gateNode, liveAgent, demoRunTrigger });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/demo/runs",
+      payload: { kind: "forced_actions" },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      kind: "forced_actions",
+      status: "running",
+    });
+    expect(demoRunTrigger).toHaveBeenCalledWith({
+      kind: "forced_actions",
+      runId: response.json().runId,
+      recordEvent: expect.any(Function),
+    });
+
+    await vi.waitFor(async () => {
+      const eventsResponse = await app.inject({
+        method: "GET",
+        url: "/v1/demo/events",
+      });
+
+      expect(eventsResponse.json().events).toMatchObject([
+        {
+          runId: response.json().runId,
+          source: "smoke",
+          name: "Forced-action smoke started",
+          status: "running",
+        },
+        {
+          runId: response.json().runId,
+          source: "smoke",
+          name: "Forced action observed",
+          status: "passed",
+          detail: { action: "hold" },
+        },
+        {
+          runId: response.json().runId,
+          source: "smoke",
+          name: "Forced-action smoke finished",
+          status: "passed",
+        },
+      ]);
+    });
+  });
+
+  it("starts a fuzz demo run against the dashboard runtime URL", async () => {
+    const gateNode: GateNode = {
+      summarize: vi.fn(),
+      preflight: vi.fn(),
+      submit: vi.fn(),
+    };
+    const liveAgent: LiveAgent = {
+      decide: vi.fn(),
+    };
+    const demoRunTrigger = vi.fn().mockResolvedValue(undefined);
+
+    const app = buildBouncerApi({ gateNode, liveAgent, demoRunTrigger });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/demo/runs",
+      payload: { kind: "fuzz" },
+    });
+
+    expect(response.statusCode).toBe(202);
+
+    await vi.waitFor(async () => {
+      const eventsResponse = await app.inject({
+        method: "GET",
+        url: "/v1/demo/events",
+      });
+
+      expect(eventsResponse.json().events[0]).toMatchObject({
+        runId: response.json().runId,
+        source: "fuzz",
+        name: "Fuzz run started",
+        status: "running",
+        detail: {
+          command: "npm run fuzz:candidates",
+          bouncerUrl: "http://127.0.0.1:3130",
+        },
+      });
+    });
+  });
+
+  it("starts a model compliance run separately from deterministic forced actions", async () => {
+    const gateNode: GateNode = {
+      summarize: vi.fn(),
+      preflight: vi.fn(),
+      submit: vi.fn(),
+    };
+    const liveAgent: LiveAgent = {
+      decide: vi.fn(),
+    };
+    const demoRunTrigger = vi.fn().mockResolvedValue(undefined);
+
+    const app = buildBouncerApi({ gateNode, liveAgent, demoRunTrigger });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/demo/runs",
+      payload: { kind: "model_compliance" },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(demoRunTrigger).toHaveBeenCalledWith({
+      kind: "model_compliance",
+      runId: response.json().runId,
+      recordEvent: expect.any(Function),
+    });
+
+    await vi.waitFor(async () => {
+      const eventsResponse = await app.inject({
+        method: "GET",
+        url: "/v1/demo/events",
+      });
+
+      expect(eventsResponse.json().events[0]).toMatchObject({
+        runId: response.json().runId,
+        source: "smoke",
+        name: "Model compliance smoke started",
+        status: "running",
+        detail: {
+          command: "npm run smoke:polar:model-compliance",
+        },
+      });
+    });
+  });
+
+  it("rejects a second demo run while one is active", async () => {
+    const gateNode: GateNode = {
+      summarize: vi.fn(),
+      preflight: vi.fn(),
+      submit: vi.fn(),
+    };
+    const liveAgent: LiveAgent = {
+      decide: vi.fn(),
+    };
+    let finishRun: () => void = () => {};
+    const demoRunTrigger = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRun = resolve;
+        }),
+    );
+
+    const app = buildBouncerApi({ gateNode, liveAgent, demoRunTrigger });
+
+    const firstResponse = await app.inject({
+      method: "POST",
+      url: "/v1/demo/runs",
+      payload: { kind: "smoke" },
+    });
+    const secondResponse = await app.inject({
+      method: "POST",
+      url: "/v1/demo/runs",
+      payload: { kind: "fuzz" },
+    });
+
+    expect(firstResponse.statusCode).toBe(202);
+    expect(secondResponse.statusCode).toBe(409);
+    expect(secondResponse.json()).toMatchObject({
+      status: "run_already_active",
+      runId: firstResponse.json().runId,
+    });
+
+    finishRun();
+  });
+});
+
 describe("Hold Queue Operator Flow", () => {
   it("lets operators list, release, and discard held transactions", async () => {
     const gateNode: GateNode = {
@@ -981,7 +1325,7 @@ describe("Hold Queue Operator Flow", () => {
 });
 
 describe("Bouncer Runtime Health", () => {
-  it("reports readiness, prompt hash, and configured node names without leaking secrets", async () => {
+  it("reports readiness, active prompt, prompt hash, and configured node names without leaking secrets", async () => {
     const gateNode: GateNode = {
       summarize: vi.fn(),
       preflight: vi.fn(),
@@ -995,6 +1339,7 @@ describe("Bouncer Runtime Health", () => {
       gateNode,
       liveAgent,
       runtime: {
+        prompt: "Prefer pass unless the smoke directive asks for a different result.",
         promptHash:
           "sha256:797802292fafe4572517110ae2c3cc89a67d5fac52369f4aef091a08479ea205",
         gateNodeName: "backend1",
@@ -1010,6 +1355,7 @@ describe("Bouncer Runtime Health", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       status: "ready",
+      prompt: "Prefer pass unless the smoke directive asks for a different result.",
       promptHash:
         "sha256:797802292fafe4572517110ae2c3cc89a67d5fac52369f4aef091a08479ea205",
       gateNode: "backend1",
@@ -1018,5 +1364,63 @@ describe("Bouncer Runtime Health", () => {
     expect(response.body).not.toContain("polarpass");
     expect(response.body).not.toContain("polaruser");
     expect(response.body).not.toContain("http://127.0.0.1:18443");
+  });
+
+  it("saves and activates an edited Bouncer Prompt immediately", async () => {
+    const gateNode: GateNode = {
+      summarize: vi.fn(),
+      preflight: vi.fn(),
+      submit: vi.fn(),
+    };
+    const liveAgent: LiveAgent = {
+      decide: vi.fn(),
+    };
+    const savePrompt = vi.fn().mockResolvedValue({
+      prompt: "Prefer hold when the candidate looks weird.\n",
+      promptHash:
+        "sha256:c14e36e0137bb173a998835191ccbc0b3cbee3fc17bb7755db26fa92ac798d5c",
+    });
+
+    const app = buildBouncerApi({
+      gateNode,
+      liveAgent,
+      runtime: {
+        prompt: "Prefer pass unless the smoke directive asks for a different result.",
+        promptHash:
+          "sha256:797802292fafe4572517110ae2c3cc89a67d5fac52369f4aef091a08479ea205",
+        gateNodeName: "backend1",
+        propagationWitnessNames: ["backend2", "backend3"],
+      },
+      savePrompt,
+    });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/v1/prompt",
+      payload: { prompt: "Prefer hold when the candidate looks weird.\n" },
+    });
+    const healthResponse = await app.inject({
+      method: "GET",
+      url: "/v1/health",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: "saved",
+      prompt: "Prefer hold when the candidate looks weird.\n",
+      promptHash:
+        "sha256:c14e36e0137bb173a998835191ccbc0b3cbee3fc17bb7755db26fa92ac798d5c",
+      activePromptHash:
+        "sha256:c14e36e0137bb173a998835191ccbc0b3cbee3fc17bb7755db26fa92ac798d5c",
+      requiresRestart: false,
+    });
+    expect(healthResponse.json()).toMatchObject({
+      prompt: "Prefer hold when the candidate looks weird.\n",
+      promptHash:
+        "sha256:c14e36e0137bb173a998835191ccbc0b3cbee3fc17bb7755db26fa92ac798d5c",
+    });
+    expect(savePrompt).toHaveBeenCalledWith(
+      "Prefer hold when the candidate looks weird.\n",
+    );
   });
 });

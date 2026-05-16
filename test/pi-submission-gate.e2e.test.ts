@@ -24,7 +24,7 @@ const preflight: PreflightCheck & { allowed: true } = {
   feeRateSatVb: 0.4,
 };
 
-describe("Pi-backed Submission Gate", () => {
+describe.concurrent("Pi-backed Submission Gate", () => {
   it.each([
     {
       toolName: "pass",

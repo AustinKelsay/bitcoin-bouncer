@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  allFuzzCandidateShapes,
   parseFuzzCandidateShapes,
   runFuzzCandidates,
 } from "../src/fuzz-candidate-runner.js";
@@ -46,9 +47,11 @@ describe("Fuzz Candidate runner", () => {
       true,
     );
     expect(wallet.sendRawTransaction).not.toHaveBeenCalled();
-    expect(bouncer.submitRawTransaction).toHaveBeenCalledWith(
-      "020000000001...",
-    );
+    expect(bouncer.submitRawTransaction).toHaveBeenCalledWith("020000000001...", {
+      count: 1,
+      index: 0,
+      shape: "standard-single-output",
+    });
   });
 
   it("creates a standard multi-output Fuzz Candidate when requested", async () => {
@@ -197,10 +200,188 @@ describe("Fuzz Candidate runner", () => {
     );
   });
 
+  it("creates an Ordinal inscription-style Fuzz Candidate when requested", async () => {
+    const wallet = createSingleAddressWallet("bcrt1qord");
+    const bouncer = {
+      submitRawTransaction: vi.fn().mockResolvedValue({ txid: "abc123" }),
+    };
+
+    await runFuzzCandidates({
+      wallet,
+      bouncer,
+      count: 1,
+      amountBtc: 0.00001,
+      candidateShapes: ["ord-inscription-envelope"],
+    });
+
+    expect(wallet.walletCreateFundedPsbt).toHaveBeenCalledWith(
+      [],
+      [
+        {
+          data: Buffer.from(
+            "ord\x01text/plain;charset=utf-8\x00bitcoin-bouncer",
+            "utf8",
+          ).toString("hex"),
+        },
+        { bcrt1qord: 0.00001 },
+      ],
+      0,
+      { replaceable: true },
+      true,
+    );
+  });
+
+  it("creates BRC-20 and Runes metadata Fuzz Candidates when requested", async () => {
+    const wallet = createSingleAddressWallet("bcrt1qmetadata");
+    const bouncer = {
+      submitRawTransaction: vi.fn().mockResolvedValue({ txid: "abc123" }),
+    };
+
+    await runFuzzCandidates({
+      wallet,
+      bouncer,
+      count: 3,
+      amountBtc: 0.00001,
+      candidateShapes: ["brc20-transfer", "runes-etching", "runes-transfer"],
+    });
+
+    expect(wallet.walletCreateFundedPsbt).toHaveBeenNthCalledWith(
+      1,
+      [],
+      [
+        {
+          data: Buffer.from(
+            [
+              JSON.stringify({
+                p: "brc-20",
+                op: "transfer",
+                tick: "ordi",
+                amt: "1000",
+              }),
+              "BOUNCER_FUZZ_DIRECTIVE=drop",
+              "reason=brc20 transfer metadata local fuzz withholding demo",
+            ].join(";"),
+            "utf8",
+          ).toString("hex"),
+        },
+        { bcrt1qmetadata: 0.00001 },
+      ],
+      0,
+      { replaceable: true },
+      true,
+    );
+    expect(wallet.walletCreateFundedPsbt).toHaveBeenNthCalledWith(
+      2,
+      [],
+      [
+        {
+          data: Buffer.from(
+            "RUNES:ETCH:BOUNCER•FUZZ:premine=0:terms=open",
+            "utf8",
+          ).toString("hex"),
+        },
+        { bcrt1qmetadata: 0.00001 },
+      ],
+      0,
+      { replaceable: true },
+      true,
+    );
+    expect(wallet.walletCreateFundedPsbt).toHaveBeenNthCalledWith(
+      3,
+      [],
+      [
+        {
+          data: Buffer.from("RUNES:XFER:BOUNCER•FUZZ:1", "utf8").toString(
+            "hex",
+          ),
+        },
+        { bcrt1qmetadata: 0.00001 },
+      ],
+      0,
+      { replaceable: true },
+      true,
+    );
+  });
+
+  it("creates stamp-style metadata and high-fanout Fuzz Candidates when requested", async () => {
+    const wallet = {
+      getNewAddress: vi
+        .fn()
+        .mockResolvedValueOnce("bcrt1qstamp")
+        .mockResolvedValueOnce("bcrt1qfanout1")
+        .mockResolvedValueOnce("bcrt1qfanout2")
+        .mockResolvedValueOnce("bcrt1qfanout3")
+        .mockResolvedValueOnce("bcrt1qfanout4")
+        .mockResolvedValueOnce("bcrt1qfanout5")
+        .mockResolvedValueOnce("bcrt1qfanout6")
+        .mockResolvedValueOnce("bcrt1qfanout7")
+        .mockResolvedValueOnce("bcrt1qfanout8"),
+      walletCreateFundedPsbt: vi.fn().mockResolvedValue({
+        psbt: "funded-psbt",
+      }),
+      walletProcessPsbt: vi.fn().mockResolvedValue({
+        psbt: "signed-psbt",
+      }),
+      finalizePsbt: vi.fn().mockResolvedValue({
+        hex: "020000000001...",
+        complete: true,
+      }),
+    };
+    const bouncer = {
+      submitRawTransaction: vi.fn().mockResolvedValue({ txid: "abc123" }),
+    };
+
+    await runFuzzCandidates({
+      wallet,
+      bouncer,
+      count: 2,
+      amountBtc: 0.00001,
+      candidateShapes: ["stamps-metadata", "high-fanout"],
+    });
+
+    expect(wallet.walletCreateFundedPsbt).toHaveBeenNthCalledWith(
+      1,
+      [],
+      [
+        {
+          data: Buffer.from(
+            [
+              "STAMP:base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+              "BOUNCER_FUZZ_DIRECTIVE=shadow_drop",
+              "reason=stamp metadata local fuzz shadow demo",
+            ].join(";"),
+            "utf8",
+          ).toString("hex"),
+        },
+        { bcrt1qstamp: 0.00001 },
+      ],
+      0,
+      { replaceable: true },
+      true,
+    );
+    expect(wallet.walletCreateFundedPsbt).toHaveBeenNthCalledWith(
+      2,
+      [],
+      [
+        { bcrt1qfanout1: 0.00001 },
+        { bcrt1qfanout2: 0.00001 },
+        { bcrt1qfanout3: 0.00001 },
+        { bcrt1qfanout4: 0.00001 },
+        { bcrt1qfanout5: 0.00001 },
+        { bcrt1qfanout6: 0.00001 },
+        { bcrt1qfanout7: 0.00001 },
+        { bcrt1qfanout8: 0.00001 },
+      ],
+      0,
+      { replaceable: true },
+      true,
+    );
+  });
+
   it("parses configured Fuzz Candidate shapes from a comma-separated list", () => {
     expect(
       parseFuzzCandidateShapes(
-        "standard-single-output,standard-multi-output,tiny-output,rbf-enabled,rbf-disabled,sub-1-sat-vb-fee",
+        "standard-single-output,standard-multi-output,tiny-output,rbf-enabled,rbf-disabled,sub-1-sat-vb-fee,ord-inscription-envelope,brc20-transfer,runes-etching,runes-transfer,stamps-metadata,high-fanout",
       ),
     ).toEqual([
       "standard-single-output",
@@ -209,6 +390,29 @@ describe("Fuzz Candidate runner", () => {
       "rbf-enabled",
       "rbf-disabled",
       "sub-1-sat-vb-fee",
+      "ord-inscription-envelope",
+      "brc20-transfer",
+      "runes-etching",
+      "runes-transfer",
+      "stamps-metadata",
+      "high-fanout",
+    ]);
+  });
+
+  it("exports every known Fuzz Candidate shape for full fuzz runs", () => {
+    expect(allFuzzCandidateShapes).toEqual([
+      "standard-single-output",
+      "standard-multi-output",
+      "tiny-output",
+      "rbf-enabled",
+      "rbf-disabled",
+      "sub-1-sat-vb-fee",
+      "ord-inscription-envelope",
+      "brc20-transfer",
+      "runes-etching",
+      "runes-transfer",
+      "stamps-metadata",
+      "high-fanout",
     ]);
   });
 
@@ -268,5 +472,36 @@ describe("Fuzz Candidate runner", () => {
         response: { txid: "txid-3" },
       },
     ]);
+    expect(bouncer.submitRawTransaction).toHaveBeenNthCalledWith(1, "rawtx-1", {
+      count: 3,
+      index: 0,
+      shape: "standard-single-output",
+    });
+    expect(bouncer.submitRawTransaction).toHaveBeenNthCalledWith(2, "rawtx-2", {
+      count: 3,
+      index: 1,
+      shape: "tiny-output",
+    });
+    expect(bouncer.submitRawTransaction).toHaveBeenNthCalledWith(3, "rawtx-3", {
+      count: 3,
+      index: 2,
+      shape: "standard-single-output",
+    });
   });
 });
+
+function createSingleAddressWallet(address: string) {
+  return {
+    getNewAddress: vi.fn().mockResolvedValue(address),
+    walletCreateFundedPsbt: vi.fn().mockResolvedValue({
+      psbt: "funded-psbt",
+    }),
+    walletProcessPsbt: vi.fn().mockResolvedValue({
+      psbt: "signed-psbt",
+    }),
+    finalizePsbt: vi.fn().mockResolvedValue({
+      hex: "020000000001...",
+      complete: true,
+    }),
+  };
+}

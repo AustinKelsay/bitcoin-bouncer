@@ -13,6 +13,7 @@ type DecodedTransaction = {
     value: number;
     scriptPubKey?: {
       type?: string;
+      asm?: string;
     };
   }>;
 };
@@ -66,6 +67,9 @@ export class BitcoinCoreGateNode implements GateNode {
       outputValuesSats: decoded.vout.map((output) =>
         Math.round(output.value * 100_000_000),
       ),
+      opReturnUtf8: decoded.vout
+        .map((output) => decodeOpReturnUtf8(output.scriptPubKey))
+        .filter((value): value is string => Boolean(value)),
     };
   }
 
@@ -92,6 +96,20 @@ export class BitcoinCoreGateNode implements GateNode {
     const txid = (await this.#rpc("sendrawtransaction", [rawTx])) as string;
     return { txid };
   }
+}
+
+function decodeOpReturnUtf8(input: { type?: string; asm?: string } | undefined) {
+  if (input?.type !== "nulldata" || !input.asm?.startsWith("OP_RETURN ")) {
+    return undefined;
+  }
+
+  const hex = input.asm.slice("OP_RETURN ".length).trim().split(/\s+/).at(0);
+
+  if (!hex || !/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) {
+    return undefined;
+  }
+
+  return Buffer.from(hex, "hex").toString("utf8");
 }
 
 export class BitcoinCoreObservationNode

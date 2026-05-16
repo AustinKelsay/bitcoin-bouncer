@@ -353,6 +353,15 @@ Audit outcomes include `pass`, `tag`, `drop`, `hold`, `shadow_drop`,
 `shadow_drop` still withholds the transaction and the audit event records the
 degraded storage state.
 
+Limit concurrent in-flight decisions during bursts with:
+
+```sh
+BOUNCER_DECISION_MAX_PENDING=4 npm run dev
+```
+
+When the decision queue is full, Bouncer bypasses the Live Agent, submits to the
+Gate Node, and records a `queue_full_pass` audit outcome.
+
 ### Propagation Verification
 
 For `pass` and `tag`, verify the txid appears on the **Gate Node** and
@@ -431,3 +440,31 @@ malformed candidate rejection, Fuzz Candidate submission, duplicate idempotency,
 audit lookup, action-specific follow-up checks, and propagation expectations.
 The command prints a JSON step report that can be attached to the tracking issue
 for the smoke run.
+
+### Forced-Action Pi Smoke
+
+Run strict terminal-tool coverage against the real model and Polar network:
+
+```sh
+BOUNCER_MODEL_BASE_URL=http://127.0.0.1:11434 \
+BOUNCER_MODEL_API_KEY=ollama \
+BOUNCER_MODEL_NAME=gemma4:e4b \
+npm run smoke:polar:actions
+```
+
+The forced-action smoke runner uses port `3131` by default. It generates a
+temporary prompt file with a local **Smoke Directive** for each requested
+terminal action, starts a fresh Bouncer Runtime process for that prompt, submits
+one wallet-funded Fuzz Candidate, and verifies the observed action, audit event,
+operator evidence, and propagation expectation.
+
+By default it covers `pass`, `tag`, `hold`, `drop`, and `shadow_drop`. Override
+the list with:
+
+```sh
+FORCED_ACTIONS=hold,shadow_drop npm run smoke:polar:actions
+```
+
+Forced-action smoke is strict and one-shot. If the live model returns the wrong
+tool call or Bouncer records a Live Agent fallback, the command fails with the
+observed submitter response and audit evidence.

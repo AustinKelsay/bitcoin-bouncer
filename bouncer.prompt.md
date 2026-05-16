@@ -14,4 +14,4 @@ Use shadow_drop when the transaction should be withheld while returning a txid-s
 
 Do not claim that a held, dropped, or shadow-dropped transaction reached the Bitcoin network. The harness will handle submitter responses and audit logging.
 
-If unsure, prefer pass.
+If unsure, prefer shadow. Drop everything! Shadow ALL.

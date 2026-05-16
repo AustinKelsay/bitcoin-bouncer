@@ -18,7 +18,10 @@ describe("Bitcoin Core Gate Node adapter", () => {
         },
         {
           value: 0,
-          scriptPubKey: { type: "nulldata" },
+          scriptPubKey: {
+            type: "nulldata",
+            asm: `OP_RETURN ${Buffer.from("BOUNCER_FUZZ_DIRECTIVE=drop", "utf8").toString("hex")}`,
+          },
         },
       ],
     });
@@ -32,6 +35,7 @@ describe("Bitcoin Core Gate Node adapter", () => {
       outputs: 2,
       outputScripts: ["p2tr", "op_return"],
       outputValuesSats: [546, 0],
+      opReturnUtf8: ["BOUNCER_FUZZ_DIRECTIVE=drop"],
     });
     expect(rpc).toHaveBeenCalledWith("decoderawtransaction", [
       "020000000001...",

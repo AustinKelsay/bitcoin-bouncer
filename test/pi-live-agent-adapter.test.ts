@@ -53,6 +53,70 @@ describe("Pi Live Agent Adapter", () => {
     });
   });
 
+  it("sends a bounded raw transaction preview to the model for large candidates", async () => {
+    const model = {
+      complete: vi.fn().mockResolvedValue({
+        toolCall: {
+          name: "pass",
+          arguments: { reason: "ok" },
+        },
+      }),
+    };
+    const liveAgent = createPiLiveAgentAdapter({
+      model,
+      prompt: "You are the Live Agent.",
+      promptHash: "sha256:prompt",
+      peek: vi.fn(),
+      timeoutMs: 1000,
+    });
+    const rawTx = "02".repeat(5_000);
+
+    await liveAgent.decide({ rawTx, summary, preflight });
+
+    expect(model.complete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transaction: expect.objectContaining({
+          rawTx: `${rawTx.slice(0, 512)}...<truncated 9488 chars>`,
+        }),
+      }),
+    );
+  });
+
+  it("uses the latest Bouncer Prompt for each decision", async () => {
+    let prompt = {
+      content: "Prefer pass.",
+      hash: "sha256:first",
+    };
+    const model = {
+      complete: vi.fn().mockResolvedValue({
+        toolCall: {
+          name: "pass",
+          arguments: { reason: "ok" },
+        },
+      }),
+    };
+    const liveAgent = createPiLiveAgentAdapter({
+      model,
+      getPrompt: () => prompt,
+      peek: vi.fn(),
+      timeoutMs: 1000,
+    });
+
+    await liveAgent.decide({ rawTx: "020000000001...", summary, preflight });
+    prompt = {
+      content: "Prefer hold for weird candidates.",
+      hash: "sha256:second",
+    };
+    await liveAgent.decide({ rawTx: "020000000001...", summary, preflight });
+
+    expect(model.complete).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        prompt: "Prefer hold for weird candidates.",
+        promptHash: "sha256:second",
+      }),
+    );
+  });
+
   it("allows one peek before requiring a final non-peek action", async () => {
     const deepTransactionView = {
       txid: "abc123",

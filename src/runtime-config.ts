@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import type { AgentAction } from "./domain.js";
 
 export type BouncerRuntimeConfig = {
   prompt: {
@@ -22,6 +23,10 @@ export type BouncerRuntimeConfig = {
     name: string;
     rpcUrl: string;
   }>;
+  decisionQueue: {
+    maxPending: number;
+  };
+  forcedAction?: AgentAction;
   model?: {
     provider: "openai-compatible";
     baseUrl: string;
@@ -52,11 +57,13 @@ export async function loadBouncerRuntimeConfig(
     "BITCOIN_RPC_PASSWORD",
   );
 
+  const forcedAction = parseForcedAction(environment.BOUNCER_FORCE_ACTION);
+
   return {
     prompt: {
       path: promptPath,
       content: promptContent,
-      hash: `sha256:${createHash("sha256").update(promptContent).digest("hex")}`,
+      hash: hashPrompt(promptContent),
     },
     state: {
       databasePath: environment.BOUNCER_STATE_DB_PATH ?? "state/bouncer.sqlite",
@@ -72,8 +79,39 @@ export async function loadBouncerRuntimeConfig(
     propagationWitnesses: parsePropagationWitnesses(
       environment.BITCOIN_PROPAGATION_WITNESSES,
     ),
+    decisionQueue: {
+      maxPending: parsePositiveNumber(
+        environment.BOUNCER_DECISION_MAX_PENDING,
+        Number.POSITIVE_INFINITY,
+      ),
+    },
+    ...(forcedAction ? { forcedAction } : {}),
     model: parseModelConfig(environment),
   };
+}
+
+export async function saveBouncerPromptFile(
+  promptPath: string,
+  prompt: string,
+): Promise<{ prompt: string; promptHash: string }> {
+  try {
+    await writeFile(promptPath, prompt, "utf8");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to write Bouncer Prompt at ${promptPath}: ${message}`,
+      { cause: error },
+    );
+  }
+
+  return {
+    prompt,
+    promptHash: hashPrompt(prompt),
+  };
+}
+
+function hashPrompt(prompt: string): string {
+  return `sha256:${createHash("sha256").update(prompt).digest("hex")}`;
 }
 
 async function readPromptFile(promptPath: string): Promise<string> {
@@ -148,8 +186,32 @@ function parseModelConfig(
     baseUrl,
     apiKey: environment.BOUNCER_MODEL_API_KEY ?? "",
     name: environment.BOUNCER_MODEL_NAME ?? "gpt-4.1-mini",
-    timeoutMs: parsePositiveNumber(environment.BOUNCER_MODEL_TIMEOUT_MS, 1000),
+    timeoutMs: parsePositiveNumber(environment.BOUNCER_MODEL_TIMEOUT_MS, 30000),
   };
+}
+
+function parseForcedAction(value: string | undefined): AgentAction | undefined {
+  const action = value?.trim();
+
+  if (!action) {
+    return undefined;
+  }
+
+  if (action === "pass") {
+    return { action: "pass" };
+  }
+
+  if (action === "tag") {
+    return { action: "tag", label: "forced-smoke-tag" };
+  }
+
+  if (action === "hold" || action === "drop" || action === "shadow_drop") {
+    return { action, reason: `forced smoke ${action}` };
+  }
+
+  throw new Error(
+    `Invalid BOUNCER_FORCE_ACTION "${value}". Expected pass, tag, hold, drop, or shadow_drop.`,
+  );
 }
 
 function parsePositiveNumber(

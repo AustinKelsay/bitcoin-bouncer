@@ -38,6 +38,16 @@ type StoredShadowEscape = {
   block_height: number;
 };
 
+type StoredRunEvent = {
+  id: number;
+  run_id: string;
+  source: "smoke" | "fuzz" | "propagation";
+  name: string;
+  status: "running" | "passed" | "failed" | "skipped";
+  detail_json: string | null;
+  created_at: string;
+};
+
 export type SqliteBouncerStateStore = BouncerStateStore & {
   findAuditEvents: NonNullable<BouncerStateStore["findAuditEvents"]>;
   listHolds: NonNullable<BouncerStateStore["listHolds"]>;
@@ -46,6 +56,9 @@ export type SqliteBouncerStateStore = BouncerStateStore & {
   findShadowDrop: NonNullable<BouncerStateStore["findShadowDrop"]>;
   recordShadowEscape: NonNullable<BouncerStateStore["recordShadowEscape"]>;
   findShadowEscapes: NonNullable<BouncerStateStore["findShadowEscapes"]>;
+  listRunEvents: NonNullable<BouncerStateStore["listRunEvents"]>;
+  recordRunEvent: NonNullable<BouncerStateStore["recordRunEvent"]>;
+  clearRunEvents: NonNullable<BouncerStateStore["clearRunEvents"]>;
   close(): void;
 };
 
@@ -99,6 +112,16 @@ export function createSqliteBouncerStateStore(input: {
       block_hash TEXT NOT NULL,
       block_height INTEGER NOT NULL,
       observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS run_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      source TEXT NOT NULL,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      detail_json TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
@@ -342,6 +365,55 @@ export function createSqliteBouncerStateStore(input: {
         blockHeight: escape.block_height,
       }));
     },
+    async listRunEvents() {
+      const events = database
+        .prepare(
+          `
+          SELECT id, run_id, source, name, status, detail_json, created_at
+          FROM run_events
+          ORDER BY id ASC
+        `,
+        )
+        .all() as StoredRunEvent[];
+
+      return events.map(toRunEvent);
+    },
+    async recordRunEvent(event) {
+      const result = database
+        .prepare(
+          `
+          INSERT INTO run_events (
+            run_id,
+            source,
+            name,
+            status,
+            detail_json
+          )
+          VALUES (?, ?, ?, ?, ?)
+        `,
+        )
+        .run(
+          event.runId,
+          event.source,
+          event.name,
+          event.status,
+          event.detail === undefined ? null : JSON.stringify(event.detail),
+        );
+      const storedEvent = database
+        .prepare(
+          `
+          SELECT id, run_id, source, name, status, detail_json, created_at
+          FROM run_events
+          WHERE id = ?
+        `,
+        )
+        .get(result.lastInsertRowid) as StoredRunEvent;
+
+      return toRunEvent(storedEvent);
+    },
+    async clearRunEvents() {
+      database.exec("DELETE FROM run_events;");
+    },
     reset() {
       database.exec(`
         DELETE FROM idempotency_records;
@@ -371,6 +443,25 @@ function updateHoldStatus(
     `,
     )
     .run(status, holdId);
+}
+
+function toRunEvent(event: StoredRunEvent) {
+  return {
+    id: event.id,
+    runId: event.run_id,
+    source: event.source,
+    name: event.name,
+    status: event.status,
+    ...(event.detail_json
+      ? {
+          detail: safeJsonParse(
+            event.detail_json,
+            `Bouncer Run Event detail for event ${event.id}`,
+          ),
+        }
+      : {}),
+    createdAt: event.created_at,
+  };
 }
 
 function safeJsonParse<T = unknown>(json: string, context: string): T {

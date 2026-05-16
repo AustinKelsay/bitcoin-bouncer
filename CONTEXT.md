@@ -36,6 +36,10 @@ _Avoid_: free text decision, parsed prose
 The global system prompt loaded at startup that defines the Live Agent's transaction judgment.
 _Avoid_: per-request prompt, caller policy
 
+**Smoke Directive**:
+A local test-only instruction layered on top of the Bouncer Prompt during a smoke run to force a specific Live Agent action while preserving the normal Pi Agent Harness and Submission Gate path.
+_Avoid_: production policy, caller override, model mock
+
 **Background Analyst**:
 The agent role that studies accumulated transaction decisions and burst patterns outside the live transaction path.
 _Avoid_: live classifier, inline policy engine
@@ -147,6 +151,15 @@ _Avoid_: passed transaction, Bouncer relay, release
 - The **Bouncer Prompt** is loaded at startup; submitters cannot override policy per request.
 - The **Bouncer Prompt** is a local markdown file loaded from the configured prompt path.
 - Bouncer does not hot-reload the **Bouncer Prompt** in the MVP; each Live Agent audit event records the prompt hash.
+- A **Smoke Directive** may force a Live Agent action in local smoke runs, but it is operator/test harness input, not submitter policy.
+- A **Smoke Directive** must still use the real **Pi Agent Harness**, model tool calls, **Bouncer Runtime**, and **Submission Gate** action application path.
+- A forced-action smoke run applies its **Smoke Directive** by starting a separate **Bouncer Runtime** process with a generated prompt file, so the active prompt hash remains truthful.
+- A **Smoke Directive** must not be accepted as a per-transaction submitter field or normal **Bouncer API** parameter.
+- A forced-action smoke run is strict and one-shot; if the real model returns the wrong action or falls back, the smoke fails with the observed outcome rather than retrying.
+- Forced-action smoke is a separate smoke lane from organic model-judgment smoke; it proves every terminal tool path is live without confusing that evidence with default policy behavior.
+- Forced-action smoke expects pass and tag to propagate to the **Gate Node** and **Propagation Witnesses**.
+- Forced-action smoke expects hold, drop, and **Shadow Drop** to remain absent from the **Gate Node** and **Propagation Witnesses**.
+- Forced-action smoke must verify action-specific operator evidence: tag label, **Hold Queue** record, honest drop audit, or **Shadow Realm** record.
 - A **Background Analyst** may review many transactions, but does not block live transaction handling.
 - A **Background Analyst** monitors new blocks for **Shadow Escape** events.
 - The MVP block monitor reads new blocks from the **Gate Node** only.

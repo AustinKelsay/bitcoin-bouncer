@@ -2,7 +2,7 @@ export type FuzzCandidateWallet = {
   getNewAddress(): Promise<string>;
   walletCreateFundedPsbt(
     inputs: unknown[],
-    outputs: Array<Record<string, number>>,
+    outputs: Array<Record<string, number | string>>,
     locktime: number,
     options: Record<string, unknown>,
     bip32derivs: boolean,
@@ -12,7 +12,10 @@ export type FuzzCandidateWallet = {
 };
 
 export type BouncerSubmitClient = {
-  submitRawTransaction(rawTx: string): Promise<unknown>;
+  submitRawTransaction(
+    rawTx: string,
+    context: FuzzCandidateContext,
+  ): Promise<unknown>;
 };
 
 export type FuzzCandidateShape =
@@ -21,16 +24,36 @@ export type FuzzCandidateShape =
   | "tiny-output"
   | "rbf-enabled"
   | "rbf-disabled"
-  | "sub-1-sat-vb-fee";
+  | "sub-1-sat-vb-fee"
+  | "ord-inscription-envelope"
+  | "brc20-transfer"
+  | "runes-etching"
+  | "runes-transfer"
+  | "stamps-metadata"
+  | "high-fanout";
 
-const fuzzCandidateShapes = new Set<string>([
+export const allFuzzCandidateShapes = [
   "standard-single-output",
   "standard-multi-output",
   "tiny-output",
   "rbf-enabled",
   "rbf-disabled",
   "sub-1-sat-vb-fee",
-]);
+  "ord-inscription-envelope",
+  "brc20-transfer",
+  "runes-etching",
+  "runes-transfer",
+  "stamps-metadata",
+  "high-fanout",
+] as const satisfies readonly FuzzCandidateShape[];
+
+export type FuzzCandidateContext = {
+  shape: FuzzCandidateShape;
+  index: number;
+  count: number;
+};
+
+const fuzzCandidateShapes = new Set<string>(allFuzzCandidateShapes);
 
 export function parseFuzzCandidateShapes(
   value: string | undefined,
@@ -87,10 +110,12 @@ export async function runFuzzCandidates(input: {
       throw new Error("Unable to finalize wallet-funded Fuzz Candidate");
     }
 
+    const context = { shape, index, count: input.count };
+
     results.push({
       shape,
       rawTx: finalized.hex,
-      response: await input.bouncer.submitRawTransaction(finalized.hex),
+      response: await input.bouncer.submitRawTransaction(finalized.hex, context),
     });
   }
 
@@ -127,6 +152,74 @@ async function buildOutputs(input: {
     ];
   }
 
+  if (input.shape === "high-fanout") {
+    const addresses = await Promise.all(
+      Array.from({ length: 8 }, () => input.wallet.getNewAddress()),
+    );
+
+    return addresses.map((address) => ({ [address]: outputAmountBtc }));
+  }
+
+  if (input.shape === "ord-inscription-envelope") {
+    return [
+      { data: textToHex("ord\x01text/plain;charset=utf-8\x00bitcoin-bouncer") },
+      { [await input.wallet.getNewAddress()]: outputAmountBtc },
+    ];
+  }
+
+  if (input.shape === "brc20-transfer") {
+    return [
+      {
+        data: textToHex(
+          [
+            JSON.stringify({
+              p: "brc-20",
+              op: "transfer",
+              tick: "ordi",
+              amt: "1000",
+            }),
+            "BOUNCER_FUZZ_DIRECTIVE=drop",
+            "reason=brc20 transfer metadata local fuzz withholding demo",
+          ].join(";"),
+        ),
+      },
+      { [await input.wallet.getNewAddress()]: outputAmountBtc },
+    ];
+  }
+
+  if (input.shape === "runes-etching") {
+    return [
+      { data: textToHex("RUNES:ETCH:BOUNCER•FUZZ:premine=0:terms=open") },
+      { [await input.wallet.getNewAddress()]: outputAmountBtc },
+    ];
+  }
+
+  if (input.shape === "runes-transfer") {
+    return [
+      { data: textToHex("RUNES:XFER:BOUNCER•FUZZ:1") },
+      { [await input.wallet.getNewAddress()]: outputAmountBtc },
+    ];
+  }
+
+  if (input.shape === "stamps-metadata") {
+    return [
+      {
+        data: textToHex(
+          [
+            "STAMP:base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+            "BOUNCER_FUZZ_DIRECTIVE=shadow_drop",
+            "reason=stamp metadata local fuzz shadow demo",
+          ].join(";"),
+        ),
+      },
+      { [await input.wallet.getNewAddress()]: outputAmountBtc },
+    ];
+  }
+
   const address = await input.wallet.getNewAddress();
   return [{ [address]: outputAmountBtc }];
+}
+
+function textToHex(value: string): string {
+  return Buffer.from(value, "utf8").toString("hex");
 }

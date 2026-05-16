@@ -7,10 +7,13 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --reporter=dot",
+    "test:verbose": "vitest run --reporter=verbose",
     "dev": "tsx watch src/server.ts",
     "fuzz:candidates": "tsx scripts/fuzz-candidates.ts",
     "smoke:polar": "tsx scripts/smoke-polar.ts",
+    "smoke:polar:actions": "tsx scripts/smoke-polar-actions.ts",
+    "smoke:polar:model-compliance": "FORCED_ACTIONS_USE_MODEL=1 tsx scripts/smoke-polar-actions.ts",
     "verify:propagation": "tsx scripts/verify-propagation.ts",
     "scan:shadow-escapes": "tsx scripts/scan-shadow-escapes.ts",
     "start": "node dist/src/server.js",
