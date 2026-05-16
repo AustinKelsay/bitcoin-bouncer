@@ -1,0 +1,37 @@
+{
+  "name": "bitcoin-bouncer",
+  "version": "1.0.0",
+  "description": "`bitcoin-bouncer` is a tiny, prompt-driven transaction valve for a local Bitcoin node in a Polar sandbox.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AustinKelsay/bitcoin-bouncer.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/AustinKelsay/bitcoin-bouncer/issues"
+  },
+  "homepage": "https://github.com/AustinKelsay/bitcoin-bouncer#readme",
+  "dependencies": {
+    "fastify": "^5.8.5",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "tsx": "^4.22.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  }
+}
