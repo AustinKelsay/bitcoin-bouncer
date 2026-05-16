@@ -18,6 +18,10 @@ describe("Bouncer Runtime Config", () => {
         BITCOIN_RPC_USER: "polaruser",
         BITCOIN_RPC_PASSWORD: "polarpass",
         BITCOIN_PROPAGATION_WITNESSES: "backend2=http://127.0.0.1:18444,backend3=http://127.0.0.1:18445",
+        BOUNCER_MODEL_BASE_URL: "http://127.0.0.1:11434",
+        BOUNCER_MODEL_API_KEY: "test-key",
+        BOUNCER_MODEL_NAME: "tool-model",
+        BOUNCER_MODEL_TIMEOUT_MS: "750",
       }),
     ).resolves.toEqual({
       prompt: {
@@ -40,6 +44,13 @@ describe("Bouncer Runtime Config", () => {
         { name: "backend2", rpcUrl: "http://127.0.0.1:18444" },
         { name: "backend3", rpcUrl: "http://127.0.0.1:18445" },
       ],
+      model: {
+        provider: "openai-compatible",
+        baseUrl: "http://127.0.0.1:11434",
+        apiKey: "test-key",
+        name: "tool-model",
+        timeoutMs: 750,
+      },
     });
   });
 

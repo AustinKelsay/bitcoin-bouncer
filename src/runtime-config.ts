@@ -22,8 +22,11 @@ export type BouncerRuntimeConfig = {
     name: string;
     rpcUrl: string;
   }>;
-  piAgent?: {
-    url: string;
+  model?: {
+    provider: "openai-compatible";
+    baseUrl: string;
+    apiKey: string;
+    name: string;
     timeoutMs: number;
   };
 };
@@ -69,7 +72,7 @@ export async function loadBouncerRuntimeConfig(
     propagationWitnesses: parsePropagationWitnesses(
       environment.BITCOIN_PROPAGATION_WITNESSES,
     ),
-    piAgent: parsePiAgentConfig(environment),
+    model: parseModelConfig(environment),
   };
 }
 
@@ -131,18 +134,21 @@ function parsePropagationWitnesses(
   });
 }
 
-function parsePiAgentConfig(
+function parseModelConfig(
   environment: RuntimeEnvironment,
-): BouncerRuntimeConfig["piAgent"] {
-  const url = environment.PI_AGENT_URL?.trim();
+): BouncerRuntimeConfig["model"] {
+  const baseUrl = environment.BOUNCER_MODEL_BASE_URL?.trim();
 
-  if (!url) {
+  if (!baseUrl) {
     return undefined;
   }
 
   return {
-    url,
-    timeoutMs: parsePositiveNumber(environment.PI_AGENT_TIMEOUT_MS, 1000),
+    provider: "openai-compatible",
+    baseUrl,
+    apiKey: environment.BOUNCER_MODEL_API_KEY ?? "",
+    name: environment.BOUNCER_MODEL_NAME ?? "gpt-4.1-mini",
+    timeoutMs: parsePositiveNumber(environment.BOUNCER_MODEL_TIMEOUT_MS, 1000),
   };
 }
 

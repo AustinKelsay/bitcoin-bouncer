@@ -2,7 +2,7 @@ import { buildBouncerApi } from "./app.js";
 import { BitcoinCoreGateNode } from "./bitcoin-core-gate-node.js";
 import { createBitcoinCoreRpc } from "./bitcoin-core-rpc.js";
 import type { LiveAgent } from "./domain.js";
-import { createPiHttpAgentClient } from "./pi-http-agent-client.js";
+import { createOpenAiCompatibleModelClient } from "./openai-compatible-model-client.js";
 import { createPiLiveAgentAdapter } from "./pi-live-agent-adapter.js";
 import { loadBouncerRuntimeConfig } from "./runtime-config.js";
 import { createSqliteBouncerStateStore } from "./sqlite-state-store.js";
@@ -26,12 +26,16 @@ const gateNode = new BitcoinCoreGateNode({
   }),
 });
 
-const failOpenAgent: LiveAgent = runtimeConfig.piAgent
+const liveAgent: LiveAgent = runtimeConfig.model
   ? createPiLiveAgentAdapter({
-      client: createPiHttpAgentClient({ url: runtimeConfig.piAgent.url }),
+      model: createOpenAiCompatibleModelClient({
+        baseUrl: runtimeConfig.model.baseUrl,
+        apiKey: runtimeConfig.model.apiKey,
+        model: runtimeConfig.model.name,
+      }),
       prompt: runtimeConfig.prompt.content,
       promptHash: runtimeConfig.prompt.hash,
-      timeoutMs: runtimeConfig.piAgent.timeoutMs,
+      timeoutMs: runtimeConfig.model.timeoutMs,
       async peek(transaction) {
         return {
           txid: transaction.summary.txid,
@@ -49,7 +53,7 @@ const failOpenAgent: LiveAgent = runtimeConfig.piAgent
 
 const app = buildBouncerApi({
   gateNode,
-  liveAgent: failOpenAgent,
+  liveAgent,
   stateStore: createSqliteBouncerStateStore({
     databasePath: runtimeConfig.state.databasePath,
   }),

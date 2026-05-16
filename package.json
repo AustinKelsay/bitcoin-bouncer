@@ -12,7 +12,6 @@
     "fuzz:candidates": "tsx scripts/fuzz-candidates.ts",
     "verify:propagation": "tsx scripts/verify-propagation.ts",
     "scan:shadow-escapes": "tsx scripts/scan-shadow-escapes.ts",
-    "probe:pi-agent": "tsx scripts/probe-pi-agent.ts",
     "start": "node dist/src/server.js",
     "build": "tsc"
   },

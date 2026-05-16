@@ -18,11 +18,16 @@ const preflight: PreflightCheck & { allowed: true } = {
 
 describe("Pi Live Agent Adapter", () => {
   it("passes the Bouncer Prompt and compact transaction context to Pi and returns a structured action", async () => {
-    const client = {
-      decide: vi.fn().mockResolvedValue({ action: "shadow_drop", reason: "data-like" }),
+    const model = {
+      complete: vi.fn().mockResolvedValue({
+        toolCall: {
+          name: "shadow_drop",
+          arguments: { reason: "data-like" },
+        },
+      }),
     };
     const liveAgent = createPiLiveAgentAdapter({
-      client,
+      model,
       prompt: "You are the Live Agent.",
       promptHash: "sha256:prompt",
       peek: vi.fn(),
@@ -32,7 +37,7 @@ describe("Pi Live Agent Adapter", () => {
     await expect(
       liveAgent.decide({ rawTx: "020000000001...", summary, preflight }),
     ).resolves.toEqual({ action: "shadow_drop", reason: "data-like" });
-    expect(client.decide).toHaveBeenCalledWith({
+    expect(model.complete).toHaveBeenCalledWith({
       prompt: "You are the Live Agent.",
       promptHash: "sha256:prompt",
       transaction: {
@@ -41,6 +46,10 @@ describe("Pi Live Agent Adapter", () => {
         preflight,
       },
       deepTransactionView: undefined,
+      tools: expect.arrayContaining([
+        expect.objectContaining({ name: "peek" }),
+        expect.objectContaining({ name: "shadow_drop" }),
+      ]),
     });
   });
 
@@ -51,14 +60,19 @@ describe("Pi Live Agent Adapter", () => {
       summary,
       preflight,
     };
-    const client = {
-      decide: vi
+    const model = {
+      complete: vi
         .fn()
-        .mockResolvedValueOnce({ action: "peek" })
-        .mockResolvedValueOnce({ action: "tag", label: "normal-after-peek" }),
+        .mockResolvedValueOnce({ toolCall: { name: "peek" } })
+        .mockResolvedValueOnce({
+          toolCall: {
+            name: "tag",
+            arguments: { label: "normal-after-peek" },
+          },
+        }),
     };
     const liveAgent = createPiLiveAgentAdapter({
-      client,
+      model,
       prompt: "You are the Live Agent.",
       promptHash: "sha256:prompt",
       peek: vi.fn().mockResolvedValue(deepTransactionView),
@@ -68,7 +82,7 @@ describe("Pi Live Agent Adapter", () => {
     await expect(
       liveAgent.decide({ rawTx: "020000000001...", summary, preflight }),
     ).resolves.toEqual({ action: "tag", label: "normal-after-peek" });
-    expect(client.decide).toHaveBeenLastCalledWith({
+    expect(model.complete).toHaveBeenLastCalledWith({
       prompt: "You are the Live Agent.",
       promptHash: "sha256:prompt",
       transaction: {
@@ -77,13 +91,18 @@ describe("Pi Live Agent Adapter", () => {
         preflight,
       },
       deepTransactionView,
+      tools: expect.not.arrayContaining([
+        expect.objectContaining({ name: "peek" }),
+      ]),
     });
   });
 
-  it("falls back to pass when Pi returns a malformed action", async () => {
+  it("falls back to pass when Pi returns a malformed tool call", async () => {
     const liveAgent = createPiLiveAgentAdapter({
-      client: {
-        decide: vi.fn().mockResolvedValue({ action: "drop" }),
+      model: {
+        complete: vi.fn().mockResolvedValue({
+          toolCall: { name: "drop", arguments: {} },
+        }),
       },
       prompt: "You are the Live Agent.",
       promptHash: "sha256:prompt",
@@ -101,11 +120,11 @@ describe("Pi Live Agent Adapter", () => {
 
   it("falls back to pass when Pi peeks more than once or never returns a final action", async () => {
     const liveAgent = createPiLiveAgentAdapter({
-      client: {
-        decide: vi
+      model: {
+        complete: vi
           .fn()
-          .mockResolvedValueOnce({ action: "peek" })
-          .mockResolvedValueOnce({ action: "peek" }),
+          .mockResolvedValueOnce({ toolCall: { name: "peek" } })
+          .mockResolvedValueOnce({ toolCall: { name: "peek" } }),
       },
       prompt: "You are the Live Agent.",
       promptHash: "sha256:prompt",

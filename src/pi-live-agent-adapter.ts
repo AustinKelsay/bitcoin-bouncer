@@ -6,23 +6,37 @@ import type {
   TxSummary,
 } from "./domain.js";
 
-type PiAgentAction = AgentAction | { action: "peek" } | unknown;
+type PiToolName = AgentAction["action"] | "peek";
 
-export type PiAgentClient = {
-  decide(input: {
+export type PiToolCall = {
+  name: string;
+  arguments?: unknown;
+};
+
+export type PiModelClient = {
+  complete(input: {
     prompt: string;
     promptHash: string;
-    transaction: {
-      rawTx: string;
-      summary: TxSummary;
-      preflight: PreflightCheck & { allowed: true };
-    };
+    transaction: PiTransactionContext;
     deepTransactionView?: DeepTransactionView;
-  }): Promise<PiAgentAction>;
+    tools: PiToolDefinition[];
+  }): Promise<{ toolCall?: PiToolCall }>;
+};
+
+export type PiToolDefinition = {
+  name: PiToolName;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+type PiTransactionContext = {
+  rawTx: string;
+  summary: TxSummary;
+  preflight: PreflightCheck & { allowed: true };
 };
 
 export function createPiLiveAgentAdapter(input: {
-  client: PiAgentClient;
+  model: PiModelClient;
   prompt: string;
   promptHash: string;
   peek: (input: {
@@ -48,7 +62,7 @@ export function createPiLiveAgentAdapter(input: {
 }
 
 async function decideWithPi(input: {
-  client: PiAgentClient;
+  model: PiModelClient;
   prompt: string;
   promptHash: string;
   peek: (transaction: {
@@ -62,66 +76,76 @@ async function decideWithPi(input: {
     preflight: PreflightCheck & { allowed: true };
   };
 }): Promise<AgentAction> {
-  const firstAction = await input.client.decide({
+  const firstAction = await input.model.complete({
     prompt: input.prompt,
     promptHash: input.promptHash,
     transaction: input.transaction,
     deepTransactionView: undefined,
+    tools: firstTurnTools(),
   });
+  const firstToolCall = firstAction.toolCall;
 
-  if (isPeekAction(firstAction)) {
+  if (!firstToolCall) {
+    throw new LiveAgentFallback("no_final_action");
+  }
+
+  if (firstToolCall.name === "peek") {
     const deepTransactionView = await input.peek(input.transaction);
-    const finalAction = await input.client.decide({
+    const finalAction = await input.model.complete({
       prompt: input.prompt,
       promptHash: input.promptHash,
       transaction: input.transaction,
       deepTransactionView,
+      tools: terminalTools(),
     });
+    const finalToolCall = finalAction.toolCall;
 
-    if (isPeekAction(finalAction)) {
+    if (!finalToolCall) {
+      throw new LiveAgentFallback("no_final_action");
+    }
+
+    if (finalToolCall.name === "peek") {
       throw new LiveAgentFallback("tool_limit_violation");
     }
 
-    return validateFinalAction(finalAction);
+    return validateFinalToolCall(finalToolCall);
   }
 
-  return validateFinalAction(firstAction);
+  return validateFinalToolCall(firstToolCall);
 }
 
-function validateFinalAction(action: PiAgentAction): AgentAction {
-  if (!isRecord(action) || typeof action.action !== "string") {
+function validateFinalToolCall(toolCall: PiToolCall): AgentAction {
+  if (typeof toolCall.name !== "string") {
     throw new LiveAgentFallback("malformed_action");
   }
 
-  if (action.action === "pass") {
-    return typeof action.reason === "string"
-      ? { action: "pass", reason: action.reason }
+  const args = isRecord(toolCall.arguments) ? toolCall.arguments : {};
+
+  if (toolCall.name === "pass") {
+    return typeof args.reason === "string"
+      ? { action: "pass", reason: args.reason }
       : { action: "pass" };
   }
 
   if (
-    (action.action === "hold" ||
-      action.action === "drop" ||
-      action.action === "shadow_drop") &&
-    typeof action.reason === "string" &&
-    action.reason.length > 0
+    (toolCall.name === "hold" ||
+      toolCall.name === "drop" ||
+      toolCall.name === "shadow_drop") &&
+    typeof args.reason === "string" &&
+    args.reason.length > 0
   ) {
-    return { action: action.action, reason: action.reason };
+    return { action: toolCall.name, reason: args.reason };
   }
 
   if (
-    action.action === "tag" &&
-    typeof action.label === "string" &&
-    action.label.length > 0
+    toolCall.name === "tag" &&
+    typeof args.label === "string" &&
+    args.label.length > 0
   ) {
-    return { action: "tag", label: action.label };
+    return { action: "tag", label: args.label };
   }
 
   throw new LiveAgentFallback("malformed_action");
-}
-
-function isPeekAction(action: PiAgentAction): action is { action: "peek" } {
-  return isRecord(action) && action.action === "peek";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -162,4 +186,74 @@ class LiveAgentFallback extends Error {
     super(reason);
     this.reason = reason;
   }
+}
+
+function firstTurnTools(): PiToolDefinition[] {
+  return [...terminalTools(), peekTool()];
+}
+
+function terminalTools(): PiToolDefinition[] {
+  return [
+    {
+      name: "pass",
+      description: "Allow the transaction through the Submission Gate.",
+      parameters: optionalReasonParameters(),
+    },
+    {
+      name: "tag",
+      description: "Allow the transaction and attach an audit-only label.",
+      parameters: requiredStringParameters("label"),
+    },
+    {
+      name: "hold",
+      description:
+        "Withhold the transaction pending explicit operator release or discard.",
+      parameters: requiredStringParameters("reason"),
+    },
+    {
+      name: "drop",
+      description: "Honestly withhold the transaction from the Gate Node.",
+      parameters: requiredStringParameters("reason"),
+    },
+    {
+      name: "shadow_drop",
+      description:
+        "Withhold the transaction while returning a txid-shaped success response.",
+      parameters: requiredStringParameters("reason"),
+    },
+  ];
+}
+
+function peekTool(): PiToolDefinition {
+  return {
+    name: "peek",
+    description:
+      "Request one bounded Deep Transaction View before making a final action decision.",
+    parameters: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  };
+}
+
+function requiredStringParameters(name: string): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      [name]: { type: "string" },
+    },
+    required: [name],
+    additionalProperties: false,
+  };
+}
+
+function optionalReasonParameters(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      reason: { type: "string" },
+    },
+    additionalProperties: false,
+  };
 }

@@ -222,32 +222,24 @@ curl http://127.0.0.1:3000/v1/health
 
 ### Pi Live Agent
 
-Set `PI_AGENT_URL` to enable the Pi-backed **Live Agent** path:
+Configure an OpenAI-compatible tool-calling model to enable the in-process
+**Pi Agent Harness**:
 
 ```sh
-export PI_AGENT_URL=http://127.0.0.1:8787/decide
-export PI_AGENT_TIMEOUT_MS=1000
+export BOUNCER_MODEL_BASE_URL=http://127.0.0.1:11434
+export BOUNCER_MODEL_API_KEY=...
+export BOUNCER_MODEL_NAME=tool-model
+export BOUNCER_MODEL_TIMEOUT_MS=1000
 ```
 
-Probe the endpoint contract before starting a full Bouncer run:
+The **Pi Agent Harness** runs in-process. It sends the model the startup-loaded
+**Bouncer Prompt**, active prompt hash, compact transaction summary, preflight
+facts, and optional bounded **Deep Transaction View** after one `peek`.
 
-```sh
-PI_AGENT_URL=http://127.0.0.1:8787/decide npm run probe:pi-agent
-```
-
-The probe sends a representative Bouncer decision request and prints the
-normalized Agent Action. It exits non-zero if the endpoint returns prose,
-unsupported JSON, or a non-2xx HTTP response.
-
-Bouncer sends Pi the startup-loaded **Bouncer Prompt**, active prompt hash,
-compact transaction summary, preflight facts, and optional bounded
-**Deep Transaction View** after one `peek`.
-
-The request body sent to `PI_AGENT_URL` is:
+The model request includes:
 
 ```json
 {
-  "prompt": "...",
   "promptHash": "sha256:...",
   "transaction": {
     "rawTx": "020000000001...",
@@ -268,36 +260,23 @@ The request body sent to `PI_AGENT_URL` is:
 }
 ```
 
-Pi must return structured JSON, not prose:
+Pi exposes Bouncer-native action tools to the model:
 
-```json
-{"action":"pass"}
-{"action":"tag","label":"low-fee-normal"}
-{"action":"hold","reason":"operator review"}
-{"action":"drop","reason":"data-like transaction shape"}
-{"action":"shadow_drop","reason":"withhold but return txid"}
-{"action":"peek"}
+```text
+pass(reason?)
+tag(label)
+hold(reason)
+drop(reason)
+shadow_drop(reason)
+peek()
 ```
 
-The HTTP client also accepts common envelopes around that same action:
-
-```json
-{"decision":{"action":"pass"}}
-{"agentAction":{"action":"drop","reason":"data-like"}}
-{"result":{"action":"tag","label":"normal"}}
-```
-
-For OpenAI-style `output_json` responses, Bouncer extracts the first content
-item shaped like:
-
-```json
-{"type":"output_json","json":{"action":"pass"}}
-```
-
-`hold`, `drop`, and `shadow_drop` require `reason`. `tag` requires `label`.
-Pi may call `peek` at most once, then it must return a final non-`peek` action.
-Timeouts, malformed actions, repeated `peek`, or no final action fail open to
-`pass` and are recorded internally as Live Agent fallback audit metadata.
+`pass`, `tag`, `hold`, `drop`, and `shadow_drop` are declarative terminal tools:
+Bouncer applies the returned Agent Action. `peek` is the only non-terminal tool.
+The first model turn exposes terminal tools plus `peek`; after `peek`, the
+second turn exposes only terminal tools. Timeouts, malformed tool calls,
+repeated `peek`, or no final action fail open to `pass` and are recorded
+internally as Live Agent fallback audit metadata.
 
 Reset the current Polar run state:
 

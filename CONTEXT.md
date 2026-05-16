@@ -20,8 +20,12 @@ _Avoid_: broadcast queue, unbounded backlog
 The agent role that makes one bounded decision for one observed transaction while the transaction is still in the local flow.
 _Avoid_: analyst, trainer, batch reviewer
 
+**Pi Agent Harness**:
+The lightweight TypeScript agent loop that powers the MVP Live Agent with the Bouncer Prompt and Bouncer-native action tools.
+_Avoid_: Bouncer Runtime, external policy service, generic chatbot
+
 **Pi Agent Adapter**:
-The narrow integration boundary between the Bouncer Runtime and the Pi-backed Live Agent.
+The narrow integration boundary between the Bouncer Runtime and the Pi Agent Harness.
 _Avoid_: scripted agent, inline Pi coupling
 
 **Agent Action**:
@@ -121,8 +125,15 @@ _Avoid_: passed transaction, Bouncer relay, release
 - Bouncer performs only minimal parse and transaction identity work before admitting a candidate to the **Decision Queue**.
 - If the **Decision Queue** is full, Bouncer bypasses the **Live Agent**, submits to the **Gate Node**, and records a queue-full pass override.
 - A **Live Agent** decides within a single transaction's **Decision Budget**.
-- The MVP **Live Agent** is Pi-backed through the **Pi Agent Adapter**.
-- The **Pi Agent Adapter** returns an **Agent Action**, not free-form prose.
+- The MVP **Live Agent** is powered by the **Pi Agent Harness** through the **Pi Agent Adapter**.
+- The **Pi Agent Harness** is core to Bouncer's Live Agent path, but it is not the **Bouncer Runtime** itself.
+- The MVP **Pi Agent Harness** runs in-process inside the **Bouncer Runtime** rather than as a separate Pi HTTP service.
+- The **Pi Agent Harness** uses a tool-calling model for Bouncer-native action tools.
+- The **Pi Agent Adapter** returns an **Agent Action** derived from a tool call, not free-form prose.
+- Free-form prose and JSON-only action parsing are outside the canonical MVP Live Agent path.
+- `pass`, `tag`, `hold`, `drop`, and **Shadow Drop** are declarative terminal tools; the **Bouncer Runtime** applies the returned **Agent Action**.
+- `peek` is the only non-terminal Live Agent tool.
+- The first Live Agent model turn exposes terminal tools plus `peek`; after `peek`, the second turn exposes only terminal tools.
 - An **Agent Action** requires a reason for hold, drop, and **Shadow Drop**; tag requires a label; pass may omit a reason.
 - An **Agent Action** missing required fields is malformed and falls back to pass with an audit override.
 - The **Bouncer Prompt** is loaded at startup; submitters cannot override policy per request.
